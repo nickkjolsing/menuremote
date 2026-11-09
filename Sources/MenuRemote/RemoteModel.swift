@@ -116,10 +116,13 @@ final class RemoteModel: ObservableObject {
     var isConnected: Bool { phase == .connected }
     var hasSavedDevice: Bool { savedDeviceID != nil }
 
-    init() {
+    // Artwork rendering uses sample data without starting setup or network discovery.
+    init(startAutomatically: Bool = true) {
         bridge.onEvent = { [weak self] event in self?.handle(event) }
         bridge.onExit = { [weak self] status in self?.bridgeExited(status) }
-        Task { await start() }
+        if startAutomatically {
+            Task { await start() }
+        }
     }
 
     // MARK: - Bridge lifecycle

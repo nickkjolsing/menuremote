@@ -1,0 +1,21 @@
+# Build output and local tooling
+.build/
+build/
+.swiftpm/
+.DS_Store
+*.xcuserstate
+xcuserdata/
+
+# Python environments and bytecode
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Local configuration and pairing credentials
+.env
+.env.*
+!.env.example
+pyatv.conf
+.pyatv.conf
+*.log
