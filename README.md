@@ -8,19 +8,19 @@
 
 # MenuRemote
 
-A native macOS menu bar remote for Apple TV. See what's playing, control playback, and navigate your TV without reaching for another device.
+A native macOS menu bar remote for Apple TV. See what's playing and control playback.
 
-- Artwork, playback progress, seeking, and 10-second skips.
-- Direction pad, keyboard controls, volume, and sleep/wake.
-- Automatic reconnect, device switching, and optional launch at login.
+- Artwork, playback progress, seeking, and 10-second skips
+- Direction pad, keyboard controls, volume, and sleep/wake
+- Automatic reconnect, device switching, and optional launch at login
 
 ## Install
 
 **Requires:** Apple silicon, macOS 14+, and [uv](https://docs.astral.sh/uv/getting-started/installation/). Keep your Mac and Apple TV on the same local network.
 
-Install uv (`brew install uv` with [Homebrew](https://brew.sh/)), then download the ZIP from [Releases](https://github.com/nickkjolsing/menuremote/releases/latest), unzip it, and move **MenuRemote.app** to `/Applications`. Downloads appear after the first release is published.
+Install uv (`brew install uv` with [Homebrew](https://brew.sh/)), then download the ZIP from [Releases](https://github.com/nickkjolsing/menuremote/releases/latest), unzip it, and move **MenuRemote.app** to `/Applications`.
 
-Builds are ad-hoc signed, not notarized. macOS may block downloaded copies; see [Apple's instructions for opening an app from an unidentified developer](https://support.apple.com/en-us/102445).
+Builds are ad-hoc signed, not notarized. macOS may block downloaded copies.
 
 <details>
 <summary>Build from source</summary>
@@ -38,7 +38,7 @@ cd menuremote
 
 </details>
 
-On first launch, MenuRemote uses uv to download Python 3.13 and install pyatv 0.18.0 in its own environment. Internet access is needed for this setup.
+On first launch, MenuRemote uses uv to download Python 3.13 and install pyatv 0.18.0 in its own environment.
 
 ## Pair & play
 
@@ -56,7 +56,7 @@ Keyboard controls work while the panel is open and focused:
 | `[` / `]` | Skip back / forward 10 seconds |
 | Escape | Close panel |
 
-Volume, artwork, and seeking depend on the TV app and audio output. See [pyatv's supported features](https://pyatv.dev/documentation/supported_features/).
+Volume, artwork, and seeking depend on the TV app and audio output.
 
 ## Troubleshooting
 
@@ -64,7 +64,7 @@ Volume, artwork, and seeking depend on the TV app and audio output. See [pyatv's
 - **Setup failed?** Confirm uv is installed, then click **Retry**.
 - **Connection lost?** Use **⋯ → Reconnect**. Logs: `~/Library/Logs/MenuRemote.log`.
 
-Pairing credentials and the Python environment stay in `~/Library/Application Support/MenuRemote/`. Keep `pyatv.conf` private; redact device names and addresses before sharing logs.
+Pairing credentials and the Python environment stay in `~/Library/Application Support/MenuRemote/`. Keep `pyatv.conf` private.
 
 ## Contributing
 
