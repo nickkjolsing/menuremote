@@ -1,0 +1,21 @@
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  conventional-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Conventional Commit title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          types='feat|fix|perf|refactor|docs|test|build|ci|chore|revert'
+          if ! grep -qE "^($types)(\([a-z0-9._-]+\))?!?: .+" <<< "$TITLE"; then
+            echo "::error::Use a Conventional Commit title, such as 'feat: add a remote' or 'fix: reconnect after sleep'."
+            exit 1
+          fi

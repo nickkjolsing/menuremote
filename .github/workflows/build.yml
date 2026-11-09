@@ -2,30 +2,72 @@ name: Build
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     runs-on: macos-15
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Check scripts
         run: |
-          bash -n build.sh scripts/render_readme.sh
+          bash -n build.sh scripts/*.sh
           python3 -c 'import ast, pathlib; ast.parse(pathlib.Path("Sources/MenuRemote/Resources/atv_bridge.py").read_text())'
-      - name: Build app
-        run: ./build.sh
-      - name: Verify app bundle
-        run: |
-          plutil -lint build/MenuRemote.app/Contents/Info.plist
-          codesign --verify --deep --strict build/MenuRemote.app
-          test -x build/MenuRemote.app/Contents/MacOS/MenuRemote
-          test -f build/MenuRemote.app/Contents/Resources/atv_bridge.py
-          test -f build/MenuRemote.app/Contents/Resources/AppIcon.icns
+      - name: Test release checks
+        run: python3 -m unittest discover -s tests -v
+      - name: Build and verify release package
+        run: bash scripts/package_release.sh
+      - name: Save verified package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: menuremote-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: build
+    if: >-
+      github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+      || github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: menuremote-${{ github.sha }}
+          path: dist
+      - name: Update release PR or create draft release
+        id: release
+        if: github.ref == 'refs/heads/main'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - name: Upload verified package and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EXPECTED_RELEASE_SHA: ${{ steps.release.outputs.sha }}
+        run: bash scripts/publish_release.sh

@@ -16,19 +16,29 @@ A native macOS menu bar remote for Apple TV. See what's playing, control playbac
 
 ## Install
 
-**Requires:** Apple silicon, macOS 14+, [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/), and [uv](https://docs.astral.sh/uv/getting-started/installation/). Keep your Mac and Apple TV on the same local network.
+**Requires:** Apple silicon, macOS 14+, and [uv](https://docs.astral.sh/uv/getting-started/installation/). Keep your Mac and Apple TV on the same local network.
+
+Install uv (`brew install uv` with [Homebrew](https://brew.sh/)), then download the ZIP from [Releases](https://github.com/nickkjolsing/menuremote/releases/latest), unzip it, and move **MenuRemote.app** to `/Applications`. Downloads appear after the first release is published.
+
+Builds are ad-hoc signed, not notarized. macOS may block downloaded copies; see [Apple's instructions for opening an app from an unidentified developer](https://support.apple.com/en-us/102445).
+
+<details>
+<summary>Build from source</summary>
+
+Requires [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/) in addition to uv.
 
 ```sh
 xcode-select --install # Skip if already installed; finish before continuing.
-brew install uv
 git clone https://github.com/nickkjolsing/menuremote.git
 cd menuremote
 ./build.sh --install
 ```
 
-The last command builds the app, installs it in `/Applications`, and opens it. Requires [Homebrew](https://brew.sh/) for the `brew` step. To build without installing, run `./build.sh`; the app lands in `build/MenuRemote.app`.
+`--install` copies the app to `/Applications` and opens it. Without that flag, the app lands in `build/MenuRemote.app`.
 
-On first launch, MenuRemote uses uv to download Python 3.13 and install pyatv 0.18.0 in its own environment. Internet access is needed for this setup. Local builds are ad-hoc signed, not notarized.
+</details>
+
+On first launch, MenuRemote uses uv to download Python 3.13 and install pyatv 0.18.0 in its own environment. Internet access is needed for this setup.
 
 ## Pair & play
 
@@ -59,5 +69,7 @@ Pairing credentials and the Python environment stay in `~/Library/Application Su
 ## Contributing
 
 Small PRs welcome. Run `./build.sh` before submitting. For bugs, [open an issue](https://github.com/nickkjolsing/menuremote/issues) with your macOS/tvOS versions, steps to reproduce, and relevant redacted logs.
+
+Use Conventional Commit PR titles: `fix:` for patches, `feat:` for features, `feat!:` for breaking changes. See [Releasing](docs/RELEASING.md) for the automated release process.
 
 [MIT licensed](LICENSE). Built with SwiftUI and [pyatv](https://github.com/postlund/pyatv). Not affiliated with Apple.

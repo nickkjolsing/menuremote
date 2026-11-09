@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "c2829791f9b31bfccdc7b2f796f943a144943fbd",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "MenuRemote",
+      "initial-version": "1.0.0",
+      "include-component-in-tag": false,
+      "changelog-path": "CHANGELOG.md",
+      "draft": true,
+      "force-tag-creation": true
+    }
+  }
+}

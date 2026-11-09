@@ -1,6 +1,7 @@
 # Build output and local tooling
 .build/
 build/
+dist/
 .swiftpm/
 .DS_Store
 *.xcuserstate

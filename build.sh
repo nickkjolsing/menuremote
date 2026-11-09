@@ -4,6 +4,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP="build/MenuRemote.app"
+VERSION="$(cat version.txt)"
+if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+    echo "version.txt must contain a stable version such as 1.0.0" >&2
+    exit 1
+fi
+REVISION="$(git rev-parse HEAD)"
 
 swift build -c release --arch arm64
 BIN="$(swift build -c release --arch arm64 --show-bin-path)/MenuRemote"
@@ -12,7 +18,11 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/MenuRemote"
 cp Support/Info.plist "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :MenuRemoteRevision string $REVISION" "$APP/Contents/Info.plist"
 cp Sources/MenuRemote/Resources/atv_bridge.py Support/AppIcon.icns "$APP/Contents/Resources/"
+cp LICENSE "$APP/Contents/Resources/LICENSE"
 codesign --force --sign - "$APP"
 
 echo "Built $APP"
