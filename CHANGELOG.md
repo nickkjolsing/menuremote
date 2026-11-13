@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/nickkjolsing/menuremote/compare/v1.0.0...v1.1.0) (2026-11-13)
+
+
+### Features
+
+* add signed updates and improve Apple TV discovery ([cbcd1b3](https://github.com/nickkjolsing/menuremote/commit/cbcd1b3144d74a64264283205a85ed6ff64d91d3))
+
 ## 1.0.0 (2026-11-09)
 
 
