@@ -11,19 +11,31 @@ if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; th
 fi
 REVISION="$(git rev-parse HEAD)"
 
-swift build -c release --arch arm64
-BIN="$(swift build -c release --arch arm64 --show-bin-path)/MenuRemote"
+swift build --disable-keychain --disable-netrc -c release --arch arm64
+BIN="$(swift build --disable-keychain --disable-netrc -c release --arch arm64 --show-bin-path)/MenuRemote"
+SPARKLE_ROOT=".build/artifacts/sparkle/Sparkle"
+SPARKLE_FRAMEWORK="$SPARKLE_ROOT/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+PUBLIC_KEY="$(cat Support/SparklePublicKey.txt)"
+python3 - "$PUBLIC_KEY" <<'PY'
+import base64, sys
+if len(base64.b64decode(sys.argv[1], validate=True)) != 32:
+    raise SystemExit("Invalid Sparkle public key")
+PY
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
+ditto "$SPARKLE_FRAMEWORK" "$APP/Contents/Frameworks/Sparkle.framework"
 cp "$BIN" "$APP/Contents/MacOS/MenuRemote"
 cp Support/Info.plist "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :MenuRemoteRevision string $REVISION" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $PUBLIC_KEY" "$APP/Contents/Info.plist"
 cp Sources/MenuRemote/Resources/atv_bridge.py Support/AppIcon.icns "$APP/Contents/Resources/"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
+cp "$SPARKLE_ROOT/LICENSE" "$APP/Contents/Resources/Sparkle.LICENSE"
 codesign --force --sign - "$APP"
+codesign --verify --deep --strict "$APP"
 
 echo "Built $APP"
 

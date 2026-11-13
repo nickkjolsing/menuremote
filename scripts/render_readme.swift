@@ -29,6 +29,7 @@ struct ReadmeArtwork {
         defaults.register(defaults: ["showRemote": true])
         let view = PlayerView()
             .environmentObject(model)
+            .environmentObject(AppUpdater())
             .defaultAppStorage(defaults)
             .environment(\.colorScheme, .dark)
             .frame(width: 340)

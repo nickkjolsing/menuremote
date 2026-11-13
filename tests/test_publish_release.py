@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import unittest
 
-from test_release import make_package
+from test_release import make_appcast, make_package
 
 
 FAKE_GH = '''#!/usr/bin/env python3
@@ -30,7 +30,8 @@ elif command == ["release", "view"]:
         print(str(state["draft"]).lower())
 elif command == ["release", "upload"]:
     source = pathlib.Path(args[3])
-    if state.get("fail_checksum") and source.name.endswith(".sha256"):
+    if ((state.get("fail_checksum") and source.name.endswith(".sha256"))
+            or (state.get("fail_feed") and source.name == "appcast.xml")):
         sys.exit(1)
     destination = pathlib.Path("remote/assets") / source.name
     if destination.exists():
@@ -41,8 +42,8 @@ elif command == ["release", "download"]:
     destination = pathlib.Path(args[args.index("--dir") + 1]) / name
     shutil.copyfile(pathlib.Path("remote/assets") / name, destination)
 elif command == ["release", "edit"]:
-    if len(list(pathlib.Path("remote/assets").iterdir())) != 2:
-        sys.exit("Published before both assets were attached")
+    if len(list(pathlib.Path("remote/assets").iterdir())) != 3:
+        sys.exit("Published before all three assets were attached")
     state["draft"] = False
 else:
     sys.exit(f"Unexpected command: {args}")
@@ -64,6 +65,7 @@ class ReleasePublishingTests(unittest.TestCase):
         self.archive = self.root / "dist/MenuRemote-1.0.0-macOS-arm64.zip"
         self.revision = "a" * 40
         make_package(self.archive, self.revision)
+        make_appcast(self.archive)
         for name, script in (("gh", FAKE_GH), ("git", f'#!/bin/sh\nprintf "%s\\n" "{self.revision}"\n')):
             path = self.root / "bin" / name
             path.write_text(script)
@@ -115,3 +117,20 @@ class ReleasePublishingTests(unittest.TestCase):
         self.save_state()
         self.assertEqual(self.publish().returncode, 0)
         self.assertFalse(list((self.root / "remote/assets").iterdir()))
+
+    def test_missing_feed_does_not_publish(self):
+        (self.root / "dist/appcast.xml").unlink()
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("SPARKLE_PRIVATE_KEY", result.stderr)
+        self.assertFalse(list((self.root / "remote/assets").iterdir()))
+
+    def test_feed_upload_failure_stays_draft_and_can_retry(self):
+        self.state["fail_feed"] = True
+        self.save_state()
+        self.assertNotEqual(self.publish().returncode, 0)
+        self.assertTrue(json.loads((self.root / "remote/state.json").read_text())["draft"])
+        self.state["fail_feed"] = False
+        self.save_state()
+        self.assertEqual(self.publish().returncode, 0)
+        self.assertFalse(json.loads((self.root / "remote/state.json").read_text())["draft"])

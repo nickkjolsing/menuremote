@@ -25,6 +25,7 @@ struct ContentView: View {
                 case .setupFailed(let message):
                     StatusView(icon: "exclamationmark.triangle", title: "Setup failed", detail: message) {
                         Button("Retry") { model.retrySetup() }
+                        CheckForUpdatesButton()
                     }
                 case .choosingDevice:
                     DevicePickerView()

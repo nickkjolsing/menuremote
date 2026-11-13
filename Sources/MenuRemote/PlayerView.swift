@@ -300,6 +300,8 @@ struct SettingsMenu: View {
                 set: { model.setLaunchAtLogin($0) }
             ))
             Divider()
+            CheckForUpdatesButton()
+            Divider()
             Button("Quit MenuRemote") { model.quit() }.keyboardShortcut("q")
         } label: {
             Image(systemName: "ellipsis.circle").font(.system(size: 15))

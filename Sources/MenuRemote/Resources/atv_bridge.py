@@ -20,7 +20,6 @@ from pyatv.const import (
     DeviceState,
     FeatureName,
     FeatureState,
-    OperatingSystem,
     PairingRequirement,
     PowerState,
     Protocol,
@@ -30,7 +29,7 @@ from pyatv.storage.file_storage import FileStorage
 
 LOG = logging.getLogger("atv_bridge")
 REMOTE_NAME = "MenuRemote"
-PAIR_PROTOCOLS = (Protocol.AirPlay, Protocol.Companion)
+PAIR_PROTOCOLS = (Protocol.AirPlay, Protocol.Companion, Protocol.MRP)
 NEEDS_PAIRING = (PairingRequirement.Mandatory, PairingRequirement.Optional)
 RECONNECT_DELAYS = (2, 5, 10, 30, 60)
 POLL_INTERVAL = 5
@@ -54,10 +53,20 @@ def emit(event, **payload):
     sys.stdout.flush()
 
 
-def is_apple_tv(conf):
-    info = conf.device_info
-    return info.operating_system == OperatingSystem.TvOS and not info.model.name.startswith(
-        "HomePod"
+def is_remote_candidate(conf):
+    """Suggest devices by remote services, independently of model/OS metadata.
+
+    AirPlay alone also describes speakers and Macs. Companion must advertise
+    pairing we support (or already have credentials); MRP is a remote service.
+    This is only a picker suggestion: other devices remain selectable too.
+    """
+    return any(
+        s.enabled and (
+            s.protocol == Protocol.MRP
+            or (s.protocol == Protocol.Companion
+                and (s.pairing in NEEDS_PAIRING or s.credentials))
+        )
+        for s in conf.services
     )
 
 
@@ -65,7 +74,7 @@ def services_to_pair(conf):
     return [
         s.protocol
         for s in conf.services
-        if s.protocol in PAIR_PROTOCOLS and s.pairing in NEEDS_PAIRING
+        if s.enabled and s.protocol in PAIR_PROTOCOLS and s.pairing in NEEDS_PAIRING
     ]
 
 
@@ -78,7 +87,7 @@ def device_dict(conf):
         "id": conf.identifier,
         "name": conf.name,
         "address": str(conf.address),
-        "model": conf.device_info.model_str,
+        "model": conf.device_info.model_str or "Unknown model",
         "paired": is_paired(conf),
     }
 
@@ -133,7 +142,9 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
         confs = await pyatv.scan(
             self.loop, timeout=timeout, identifier=identifier, storage=self.storage
         )
-        found = [c for c in confs if is_apple_tv(c)]
+        # Unknown model/OS information is never a reason to discard a device.
+        # Keep every addressable device for both selection and reconnect scans.
+        found = [c for c in confs if c.identifier]
         for conf in found:
             self.configs[conf.identifier] = conf
         return found
@@ -141,7 +152,13 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
     async def cmd_scan(self, msg):
         emit("scanning")
         found = await self.scan()
-        emit("devices", devices=[device_dict(c) for c in found])
+        suggested = [c for c in found if is_remote_candidate(c)]
+        others = [c for c in found if not is_remote_candidate(c)]
+        emit(
+            "devices",
+            devices=[device_dict(c) for c in suggested],
+            other_devices=[device_dict(c) for c in others],
+        )
 
     async def cmd_pair_begin(self, msg):
         await self.cmd_pair_cancel(msg)
@@ -149,7 +166,12 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
         if conf is None:
             raise exceptions.DeviceIdMissingError("Apple TV not found on the network")
         self.pair_conf = conf
-        self.pair_queue = services_to_pair(conf) or [Protocol.Companion]
+        self.pair_queue = services_to_pair(conf)
+        if not self.pair_queue:
+            raise exceptions.NotSupportedError(
+                "This device does not offer a supported pairing method. "
+                "Check its remote access settings and scan again."
+            )
         self.pair_step = 0
         await self.pair_next()
 
@@ -246,7 +268,19 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
             emit("asleep", device=device_dict(conf))
             self.schedule_reconnect()
             return
-        self.atv = await pyatv.connect(conf, self.loop, storage=self.storage)
+        atv = await pyatv.connect(conf, self.loop, storage=self.storage)
+        # An unclassified device may be a streaming-only receiver. Decide from
+        # actual features after connecting, never from model or OS guesses.
+        # Unavailable controls (e.g. playback while idle) are still supported.
+        if atv.features.in_state(
+            FeatureState.Unsupported,
+            FeatureName.Up, FeatureName.PlayPause, FeatureName.SetPosition,
+        ):
+            await asyncio.gather(*atv.close(), return_exceptions=True)
+            raise exceptions.NotSupportedError(
+                "This device does not provide remote controls supported by MenuRemote."
+            )
+        self.atv = atv
         self.atv.listener = self
         self.atv.push_updater.listener = self
         self.atv.power.listener = self

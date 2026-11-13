@@ -89,7 +89,9 @@ final class RemoteModel: ObservableObject {
 
     @Published var phase: Phase = .settingUp("Starting…")
     @Published var devices: [AppleTVDevice] = []
+    @Published var otherDevices: [AppleTVDevice] = []
     @Published var scanning = false
+    @Published var scanError: String?
     @Published var pairing: Pairing?
     @Published var deviceName = "Apple TV"
     @Published var nowPlaying = NowPlaying()
@@ -117,7 +119,8 @@ final class RemoteModel: ObservableObject {
     var hasSavedDevice: Bool { savedDeviceID != nil }
 
     // Artwork rendering uses sample data without starting setup or network discovery.
-    init(startAutomatically: Bool = true) {
+    init(startAutomatically: Bool = true, defaults: UserDefaults? = nil) {
+        _savedDeviceID = AppStorage("deviceID", store: defaults)
         bridge.onEvent = { [weak self] event in self?.handle(event) }
         bridge.onExit = { [weak self] status in self?.bridgeExited(status) }
         if startAutomatically {
@@ -165,7 +168,10 @@ final class RemoteModel: ObservableObject {
 
     // MARK: - Events
 
-    private func handle(_ e: [String: Any]) {
+    func handle(_ e: [String: Any]) {
+        // Background retries for the previous TV must not dismiss the picker
+        // or replace a pairing the user has started for another device.
+        let choosingDevice = phase == .choosingDevice || pairing != nil
         switch e["event"] as? String {
         case "ready":
             if let id = savedDeviceID {
@@ -176,35 +182,41 @@ final class RemoteModel: ObservableObject {
             }
         case "scanning":
             scanning = true
+            scanError = nil
         case "devices":
             scanning = false
+            scanError = nil
             devices = (e["devices"] as? [[String: Any]] ?? []).compactMap(AppleTVDevice.init)
+            otherDevices = (e["other_devices"] as? [[String: Any]] ?? []).compactMap(AppleTVDevice.init)
         case "connecting":
-            if !isConnected { phase = .connecting(deviceName) }
+            if !choosingDevice && !isConnected { phase = .connecting(deviceName) }
         case "connected":
             restartAttempts = 0
+            bridgeConnected = true
+            guard !choosingDevice else { break }
             if let device = (e["device"] as? [String: Any]).flatMap(AppleTVDevice.init) {
                 deviceName = device.name
                 savedDeviceID = device.id
             }
             pairing = nil
-            bridgeConnected = true
             phase = .connected
         case "needs_pairing":
+            guard !choosingDevice else { break }
             if let device = (e["device"] as? [String: Any]).flatMap(AppleTVDevice.init) {
                 deviceName = device.name
                 pair(device)
             }
         case "asleep":
             bridgeConnected = false
-            phase = .asleep
+            if !choosingDevice { phase = .asleep }
             powerOn = false
         case "disconnected":
             bridgeConnected = false
-            if (e["reason"] as? String) != "user" {
+            if !choosingDevice && (e["reason"] as? String) != "user" {
                 phase = .disconnected("Connection lost")
             }
         case "reconnecting":
+            guard !choosingDevice else { break }
             if case .asleep = phase { break }
             let seconds = e["seconds"] as? Int ?? 0
             phase = .disconnected("Reconnecting in \(seconds)s…")
@@ -225,7 +237,10 @@ final class RemoteModel: ObservableObject {
             if e["known"] as? Bool ?? true { powerOn = e["on"] as? Bool }
         case "error":
             let message = e["message"] as? String ?? "Unknown error"
-            if pairing != nil, ["pair_begin", "pair_pin"].contains(e["command"] as? String) {
+            if e["command"] as? String == "scan" {
+                scanning = false
+                scanError = message
+            } else if pairing != nil, ["pair_begin", "pair_pin"].contains(e["command"] as? String) {
                 pairing?.busy = false
                 pairing?.error = message
             } else if case .connecting = phase, e["command"] as? String == "connect" {
@@ -274,6 +289,7 @@ final class RemoteModel: ObservableObject {
 
     func scan() {
         scanning = true
+        scanError = nil
         bridge.send(["cmd": "scan"])
     }
 

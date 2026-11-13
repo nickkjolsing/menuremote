@@ -2,6 +2,11 @@ import SwiftUI
 
 struct DevicePickerView: View {
     @EnvironmentObject var model: RemoteModel
+    @State private var showOtherDevices = false
+
+    private var visibleDevices: [AppleTVDevice] {
+        model.devices + (showOtherDevices ? model.otherDevices : [])
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -17,24 +22,47 @@ struct DevicePickerView: View {
                 }
             }
 
-            if model.devices.isEmpty {
+            if visibleDevices.isEmpty {
                 Text(model.scanning
                      ? "Looking for Apple TVs on your network…"
                      : "No Apple TVs found. Make sure it's on the same network, and that MenuRemote is allowed under System Settings › Privacy & Security › Local Network.")
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                VStack(spacing: 4) {
-                    ForEach(model.devices) { device in
-                        DeviceRow(device: device)
+                ScrollView {
+                    VStack(spacing: 4) {
+                        ForEach(visibleDevices) { device in
+                            DeviceRow(device: device)
+                        }
                     }
                 }
+                .frame(height: min(CGFloat(visibleDevices.count) * 60, 240))
+            }
+
+            if !model.otherDevices.isEmpty {
+                Button(showOtherDevices ? "Hide other devices" : "Show other devices (\(model.otherDevices.count))") {
+                    showOtherDevices.toggle()
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                if showOtherDevices {
+                    Text("If your TV wasn't listed above, select it here. Some devices may not support remote control.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if let error = model.scanError {
+                Text("Scan failed: \(error)")
+                    .font(.callout).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack {
                 if model.hasSavedDevice {
                     Button("Back") { model.closeDevicePicker() }.buttonStyle(.borderless)
                 }
+                CheckForUpdatesButton().buttonStyle(.borderless)
                 Spacer()
                 Button("Quit") { model.quit() }.buttonStyle(.borderless).foregroundStyle(.secondary)
             }

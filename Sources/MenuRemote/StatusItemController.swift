@@ -7,6 +7,7 @@ import SwiftUI
 @MainActor
 final class StatusItemController: NSObject, NSApplicationDelegate {
     private let model = RemoteModel()
+    private let updater = AppUpdater()
     private var statusItem: NSStatusItem!
     private var panel: RemotePanel!
     private var hostingView: SizeReportingHostingView!
@@ -22,7 +23,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate {
 
         ProcessInfo.processInfo.disableAutomaticTermination("Menu bar app stays running")
 
-        hostingView = SizeReportingHostingView(rootView: AnyView(PanelContent().environmentObject(model)))
+        hostingView = SizeReportingHostingView(rootView: AnyView(
+            PanelContent().environmentObject(model).environmentObject(updater)
+        ))
         hostingView.onSizeChange = { [weak self] size in self?.resize(to: size) }
         panel = RemotePanel(content: hostingView)
         // SwiftUI doesn't reliably announce size changes, so re-measure whenever
@@ -34,6 +37,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate {
             .sink { [weak self] _ in self?.hostingView.scheduleSizeReport() }
             .store(in: &cancellables)
         panel.onCancel = { [weak self] in self?.closePanel() }
+        updater.willCheckForUpdates = { [weak self] in self?.closePanel() }
+        updater.start()
 
         model.$nowPlaying.combineLatest(model.$phase)
             .sink { [weak self] nowPlaying, phase in

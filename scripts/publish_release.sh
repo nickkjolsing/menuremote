@@ -26,10 +26,14 @@ if [[ "$TAG_REVISION" != "$REVISION" ]]; then
     exit 0
 fi
 
+# Never publish an updater-enabled release without its signed feed. Do this only
+# after finding a matching release, so ordinary pushes can still open release PRs.
+python3 scripts/verify_release.py "dist/$ARCHIVE" "$VERSION" "$REVISION" --require-appcast
+
 VERIFY_DIR="$(mktemp -d)"
 trap 'rm -rf "$VERIFY_DIR"' EXIT
 ASSETS="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
-for asset in "$ARCHIVE" "$ARCHIVE.sha256"; do
+for asset in "$ARCHIVE" "$ARCHIVE.sha256" appcast.xml; do
     if grep -Fxq "$asset" <<< "$ASSETS"; then
         gh release download "$TAG" --pattern "$asset" --dir "$VERIFY_DIR"
         # Never replace previously uploaded bytes, including on retries.
@@ -43,4 +47,4 @@ IS_DRAFT="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
 if [[ "$IS_DRAFT" == true ]]; then
     gh release edit "$TAG" --draft=false
 fi
-echo "Published $TAG with verified app and checksum."
+echo "Published $TAG with verified app, checksum, and signed update feed."
