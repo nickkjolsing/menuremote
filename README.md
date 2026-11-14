@@ -1,4 +1,4 @@
-![MenuRemote — Apple TV, from your menu bar. The app interface with sample playback and the remote expanded.](docs/images/menuremote.png)
+![MenuRemote — An Apple TV remote in your menu bar. The app interface with sample playback and the remote expanded.](docs/images/menuremote.png)
 
 <p align="center">
   <img alt="macOS 14 or later" src="https://img.shields.io/badge/macOS-14%2B-222222?logo=apple&amp;logoColor=white">

@@ -62,6 +62,7 @@ struct ReadmeArtwork {
             bytesPerRow: 0, bitsPerPixel: 0)!
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        NSGraphicsContext.current?.imageInterpolation = .high
         let transform = NSAffineTransform()
         transform.scale(by: CGFloat(scale))
         transform.concat()
@@ -73,14 +74,11 @@ struct ReadmeArtwork {
                      xRadius: 24, yRadius: 24).fill()
 
         NSImage(contentsOfFile: "Support/AppIcon.icns")?
-            .draw(in: NSRect(x: 72, y: 546, width: 64, height: 64))
-        text("MenuRemote", x: 148, y: 565, size: 27, weight: .semibold)
-        text("Apple TV,", x: 84, y: 414, size: 64, weight: .semibold)
-        text("from your", x: 84, y: 338, size: 64, weight: .semibold)
-        text("menu bar.", x: 84, y: 262, size: 64, weight: .semibold)
-        text("Playback. Navigation. A click away.", x: 88, y: 190,
+            .draw(in: NSRect(x: 80, y: 335, width: 132, height: 132))
+        text("MenuRemote", x: 88, y: 265, size: 48, weight: .semibold)
+        text("An Apple TV remote in your menu bar.", x: 91, y: 229,
              size: 22, weight: .regular, ink: color(0x68656e))
-        text("macOS 14+  /  Apple silicon", x: 88, y: 66,
+        text("macOS 14+  /  Apple silicon", x: 91, y: 66,
              size: 16, weight: .medium, ink: color(0x68656e))
 
         let panel = NSRect(x: 750, y: (660 - size.height) / 2 - 10,
