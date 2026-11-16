@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/nickkjolsing/menuremote/compare/v1.1.0...v1.1.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* restore playback controls and connection recovery ([d788e67](https://github.com/nickkjolsing/menuremote/commit/d788e679c8bd8cac2c30c7756a8a81713d9282b2))
+
 ## [1.1.0](https://github.com/nickkjolsing/menuremote/compare/v1.0.0...v1.1.0) (2026-11-13)
 
 
