@@ -90,11 +90,30 @@ enum RemoteModelTests {
         }
     }
 
+    static func testVariableSpeedPlaybackShowsPauseAndCanToggle() {
+        withModel { model in
+            model.handle(["event": "connected", "device": oldDevice])
+            model.handle([
+                "event": "now_playing", "state": "seeking", "title": "Sample",
+                "position": 10.0, "total": 100.0,
+            ])
+            precondition(model.nowPlaying.isPlaying, "Variable speed playback should show Pause")
+            precondition(!model.nowPlaying.isIdle)
+            model.playPause()
+            precondition(model.nowPlaying.state == "paused", "Clicking Pause should pause optimistically")
+            model.handle(["event": "now_playing", "state": "paused", "title": "Sample"])
+            precondition(!model.nowPlaying.isPlaying)
+            model.playPause()
+            precondition(model.nowPlaying.state == "playing", "Clicking Play should resume")
+        }
+    }
+
     static func main() {
         testOldConnectionEventsDoNotDismissDevicePicker()
         testOldConnectionDoesNotCancelReplacementPairing()
         testScanFailureStopsSpinnerAndAllowsRetry()
         testUnclassifiedDevicesRemainSelectable()
-        print("All 4 device picker tests passed")
+        testVariableSpeedPlaybackShowsPauseAndCanToggle()
+        print("All 5 remote model tests passed")
     }
 }
