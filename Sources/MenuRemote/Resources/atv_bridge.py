@@ -24,7 +24,7 @@ from pyatv.const import (
     PowerState,
     Protocol,
 )
-from pyatv.interface import AudioListener, DeviceListener, PowerListener, PushListener
+from pyatv.interface import AudioListener, DeviceListener, PowerListener, PushListener, RemoteControl
 from pyatv.storage.file_storage import FileStorage
 
 LOG = logging.getLogger("atv_bridge")
@@ -33,6 +33,9 @@ PAIR_PROTOCOLS = (Protocol.AirPlay, Protocol.Companion, Protocol.MRP)
 NEEDS_PAIRING = (PairingRequirement.Mandatory, PairingRequirement.Optional)
 RECONNECT_DELAYS = (2, 5, 10, 30, 60)
 POLL_INTERVAL = 5
+CONNECT_TIMEOUT = 30
+REFRESH_TIMEOUT = 10
+CLOSE_TIMEOUT = 5
 
 KEYS = {"up", "down", "left", "right", "select", "menu", "home", "top_menu"}
 FEATURES = {
@@ -107,6 +110,8 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
         self.reconnect_task = None
         self.poll_task = None
         self.closing = False
+        self.connection_commands = asyncio.Lock()
+        self.connection_attempt = asyncio.Lock()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -123,7 +128,7 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
             except json.JSONDecodeError:
                 continue
             asyncio.ensure_future(self.handle(msg))
-        await self.disconnect()
+        await self.cmd_disconnect({})
 
     async def handle(self, msg):
         cmd = msg.get("cmd")
@@ -240,20 +245,43 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
 
     # -- connection --------------------------------------------------------
 
+    async def cancel_reconnect(self):
+        task = self.reconnect_task
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            if self.reconnect_task is task:
+                self.reconnect_task = None
+
     async def cmd_connect(self, msg):
-        self.target_id = msg["id"]
-        if self.reconnect_task:
-            self.reconnect_task.cancel()
-            self.reconnect_task = None
-        await self.disconnect()
-        await self.connect(wake=msg.get("wake", False))
+        # Commands arrive concurrently. Finish cancelling the old attempt before
+        # starting another, so its cleanup cannot overwrite the new connection.
+        async with self.connection_commands:
+            await self.cancel_reconnect()
+            self.target_id = msg["id"]
+            await self.disconnect()
+            await self.connect(wake=msg.get("wake", False))
 
     async def cmd_disconnect(self, msg):
-        self.target_id = None
-        await self.disconnect()
-        emit("disconnected", reason="user")
+        async with self.connection_commands:
+            self.target_id = None
+            await self.cancel_reconnect()
+            await self.disconnect()
+            emit("disconnected", reason="user")
 
     async def connect(self, wake=False):
+        async with self.connection_attempt:
+            try:
+                async with asyncio.timeout(CONNECT_TIMEOUT):
+                    await self.establish_connection(wake)
+            except (Exception, asyncio.CancelledError):
+                await self.disconnect()
+                # Cancellation means another command is taking over, not a failure.
+                if not asyncio.current_task().cancelling():
+                    self.schedule_reconnect()
+                raise
+
+    async def establish_connection(self, wake=False):
         emit("connecting", id=self.target_id)
         found = await self.scan(self.target_id, timeout=4)
         if not found:
@@ -290,8 +318,15 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
         emit("connected", device=device_dict(conf))
         self.powerstate_update(None, self.atv.power.power_state)
         self.emit_volume()
-        await self.refresh()
-        self.poll_task = asyncio.ensure_future(self.poll())
+        # Metadata is optional: a slow response must not strand an otherwise
+        # usable remote, or prevent the polling task from being started.
+        try:
+            await self.refresh()
+        except Exception:
+            LOG.debug("initial metadata refresh failed", exc_info=True)
+        if self.atv is atv:
+            self.poll_task = asyncio.ensure_future(self.poll())
+            LOG.info("connected to %s", conf.name)
 
     async def disconnect(self):
         if self.poll_task:
@@ -301,8 +336,13 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
             atv, self.atv = self.atv, None
             self.closing = True
             try:
-                atv.push_updater.stop()
-                await asyncio.gather(*atv.close(), return_exceptions=True)
+                # pyatv.close() already stops push updates and is idempotent.
+                # Accessing push_updater after a loss raises BlockedStateError.
+                atv.listener = None
+                async with asyncio.timeout(CLOSE_TIMEOUT):
+                    await asyncio.gather(*atv.close(), return_exceptions=True)
+            except TimeoutError:
+                LOG.warning("timed out closing the previous connection")
             finally:
                 self.closing = False
 
@@ -324,7 +364,8 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
                     LOG.info("reconnect failed: %s", ex)
                 attempt += 1
         finally:
-            self.reconnect_task = None
+            if self.reconnect_task is asyncio.current_task():
+                self.reconnect_task = None
 
     # -- state -------------------------------------------------------------
 
@@ -339,7 +380,11 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
     async def refresh(self):
         if self.atv is None:
             return
-        await self.publish(await self.atv.metadata.playing())
+        atv = self.atv
+        async with asyncio.timeout(REFRESH_TIMEOUT):
+            playing = await atv.metadata.playing()
+            if self.atv is atv:
+                await self.publish(playing)
 
     def features(self):
         feats = self.atv.features
@@ -423,7 +468,15 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
         await getattr(self.require_atv().remote_control, key)()
 
     async def cmd_play_pause(self, msg):
-        await self.require_atv().remote_control.play_pause()
+        atv = self.require_atv()
+        # MRP's emulated toggle silently ignores Seeking, which also represents
+        # normal playback at speeds such as 1.25x. Prefer the physical remote's
+        # Companion button; pyatv falls back to other protocols on older TVs.
+        release = atv.takeover(Protocol.Companion, RemoteControl)
+        try:
+            await atv.remote_control.play_pause()
+        finally:
+            release()
         await self.after_command()
 
     async def cmd_skip(self, msg):
@@ -447,10 +500,7 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
 
     async def cmd_power(self, msg):
         if self.atv is None and msg["on"] and self.target_id:
-            if self.reconnect_task:
-                self.reconnect_task.cancel()
-                self.reconnect_task = None
-            await self.connect(wake=True)
+            await self.cmd_connect({"id": self.target_id, "wake": True})
         power = self.require_atv().power
         await (power.turn_on() if msg["on"] else power.turn_off())
 
@@ -466,6 +516,8 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
         LOG.debug("push update error: %s", exception)
 
     def connection_lost(self, exception):
+        if self.closing:
+            return
         LOG.info("connection lost: %s", exception)
         self.atv = None
         if self.poll_task:

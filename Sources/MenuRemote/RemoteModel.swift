@@ -30,7 +30,8 @@ struct NowPlaying: Equatable {
     var sampledAt = Date()
     var features: [String: Bool] = [:]
 
-    var isPlaying: Bool { state == "playing" }
+    // pyatv reports nonstandard playback rates (e.g. 1.25x) as seeking.
+    var isPlaying: Bool { state == "playing" || state == "seeking" }
     var isIdle: Bool { state == "idle" || state == "stopped" || title == nil }
 
     func supports(_ feature: String) -> Bool { features[feature] ?? false }
