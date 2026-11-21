@@ -2,12 +2,16 @@ import SwiftUI
 
 struct PlayerView: View {
     @EnvironmentObject var model: RemoteModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("showRemote") private var showRemote = false
     @State private var scrubFraction: Double?
+    @State private var hideText = false
     @FocusState private var focused: Bool
+    @FocusState private var textFocused: Bool
 
     private var np: NowPlaying { model.nowPlaying }
     private var connected: Bool { model.isConnected }
+    private var showKeyboard: Bool { model.needsTextEntry }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -18,6 +22,9 @@ struct PlayerView: View {
             progress
             transport
             volume
+            if showKeyboard {
+                textEntry
+            }
             if showRemote {
                 Divider().opacity(0.5)
                 DPadView()
@@ -33,6 +40,31 @@ struct PlayerView: View {
         .focused($focused)
         .onAppear { focused = true }
         .onKeyPress(phases: .down, action: handleKey)
+        .onChange(of: showKeyboard) { _, shown in
+            // An incoming TV focus event reveals the field without redirecting
+            // navigation keys. Focus it only after the user opens the panel or clicks it.
+            if !shown && textFocused {
+                textFocused = false
+                focused = true
+            }
+        }
+        .onChange(of: model.textFocusRequest) { _, _ in
+            if showKeyboard {
+                focused = false
+                textFocused = true
+            }
+        }
+        .onChange(of: model.textSending) { _, sending in
+            if !sending && showKeyboard && connected && model.keyboardAvailable {
+                textFocused = true
+            }
+        }
+        .onChange(of: model.textDraft) { _, draft in
+            if !draft.isEmpty {
+                model.textSent = false
+                model.textError = nil
+            }
+        }
     }
 
     // MARK: - Sections
@@ -146,8 +178,94 @@ struct PlayerView: View {
 
     // MARK: - Keyboard
 
+    private var textEntry: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 8) {
+                ZStack(alignment: .leading) {
+                    Group {
+                        if hideText {
+                            SecureField("Type on Apple TV", text: $model.textDraft)
+                        } else {
+                            TextField("Type on Apple TV", text: $model.textDraft)
+                        }
+                    }
+                    .textFieldStyle(.plain)
+                    .focused($textFocused)
+                    .onSubmit { model.sendText() }
+                    .disabled(!connected || !model.keyboardAvailable || model.textSending)
+                    .accessibilityLabel("Text to send to Apple TV")
+                    // Keep the editor alive so typing can dismiss the receipt immediately.
+                    .opacity(model.textSent ? 0 : 1)
+                    .offset(y: !reduceMotion && model.textSent ? -4 : 0)
+
+                    if model.textSent {
+                        HStack(spacing: 7) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Color(nsColor: .systemGreen).opacity(0.8))
+                                .accessibilityHidden(true)
+                            Text("Sent to Apple TV")
+                        }
+                        .allowsHitTesting(false)
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 4)))
+                    }
+                }
+                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.24), value: model.textSent)
+
+                Button {
+                    hideText.toggle()
+                    textFocused = true
+                } label: {
+                    Image(systemName: hideText ? "eye.slash" : "eye")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(hideText ? "Show text" : "Hide text")
+                .accessibilityLabel(hideText ? "Show text" : "Hide text")
+
+                Button { model.sendText() } label: {
+                    ZStack {
+                        Circle().fill(Color.accentColor.opacity(model.canSendText ? 1 : 0.12))
+                        if model.textSending {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(model.canSendText ? .white : .secondary)
+                        }
+                    }
+                    .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .disabled(!model.canSendText)
+                .help("Send text to Apple TV")
+                .accessibilityLabel("Send text to Apple TV")
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.primary.opacity(0.09), lineWidth: 0.5))
+
+            if let error = textEntryError {
+                Text(error)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 2)
+            }
+        }
+    }
+
+    private var textEntryError: String? {
+        if let error = model.textError { return error }
+        if model.textDraft.unicodeScalars.count > 4096 { return "Use 4,096 characters or fewer." }
+        return nil
+    }
+
     private func handleKey(_ press: KeyPress) -> KeyPress.Result {
-        guard connected else { return .ignored }
+        guard connected && !textFocused else { return .ignored }
         switch press.key {
         case .upArrow: model.press("up")
         case .downArrow: model.press("down")
@@ -289,20 +407,22 @@ struct ScrubBar: View {
 
 struct SettingsMenu: View {
     @EnvironmentObject var model: RemoteModel
+    @Environment(\.showAbout) private var showAbout
 
     var body: some View {
         Menu {
-            Button("Reconnect") { model.reconnect() }
-            Button("Switch Apple TV…") { model.showDevicePicker() }
+            Button("About MenuRemote", action: showAbout)
+            CheckForUpdatesButton()
             Divider()
             Toggle("Launch at Login", isOn: Binding(
                 get: { model.launchAtLogin },
                 set: { model.setLaunchAtLogin($0) }
             ))
             Divider()
-            CheckForUpdatesButton()
+            Button("Reconnect") { model.reconnect() }
+            Button("Switch Apple TV…") { model.showDevicePicker() }
             Divider()
-            Button("Quit MenuRemote") { model.quit() }.keyboardShortcut("q")
+            Button("Quit") { model.quit() }.keyboardShortcut("q")
         } label: {
             Image(systemName: "ellipsis.circle").font(.system(size: 15))
         }

@@ -1,10 +1,14 @@
 // Renders the app icon and packs it into an .icns file.
 // Usage: swift scripts/make_icon.swift Support/AppIcon.icns
+// Native About background: swift scripts/make_icon.swift --about-background Support/AboutLogoBackground.png
 import AppKit
 
-let output = URL(fileURLWithPath: CommandLine.arguments.dropFirst().first ?? "Support/AppIcon.icns")
+let aboutOnly = CommandLine.arguments.contains("--about-background")
+let output = URL(fileURLWithPath: aboutOnly
+    ? (CommandLine.arguments.dropFirst(2).first ?? "Support/AboutLogoBackground.png")
+    : (CommandLine.arguments.dropFirst().first ?? "Support/AppIcon.icns"))
 
-func render(size: Int) -> Data {
+func render(size: Int, includesShadow: Bool = true, includesGlyph: Bool = true) -> Data {
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size,
                                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
@@ -16,15 +20,17 @@ func render(size: Int) -> Data {
     let tile = NSRect(x: 100, y: 100, width: 824, height: 824).applying(.init(scaleX: scale, y: scale))
     let shape = NSBezierPath(roundedRect: tile, xRadius: 185 * scale, yRadius: 185 * scale)
 
-    NSGraphicsContext.saveGraphicsState()
-    let shadow = NSShadow()
-    shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
-    shadow.shadowOffset = NSSize(width: 0, height: -10 * scale)
-    shadow.shadowBlurRadius = 24 * scale
-    shadow.set()
-    NSColor.black.setFill()
-    shape.fill()
-    NSGraphicsContext.restoreGraphicsState()
+    if includesShadow {
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+        shadow.shadowOffset = NSSize(width: 0, height: -10 * scale)
+        shadow.shadowBlurRadius = 24 * scale
+        shadow.set()
+        NSColor.black.setFill()
+        shape.fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
 
     NSGraphicsContext.saveGraphicsState()
     shape.addClip()
@@ -41,7 +47,7 @@ func render(size: Int) -> Data {
     // Siri Remote glyph.
     let config = NSImage.SymbolConfiguration(pointSize: 470 * scale, weight: .regular)
         .applying(.init(paletteColors: [.white]))
-    if let glyph = NSImage(systemSymbolName: "appletvremote.gen4.fill", accessibilityDescription: nil)?
+    if includesGlyph, let glyph = NSImage(systemSymbolName: "appletvremote.gen4.fill", accessibilityDescription: nil)?
         .withSymbolConfiguration(config) {
         let s = glyph.size
         glyph.draw(in: NSRect(x: (CGFloat(size) - s.width) / 2, y: (CGFloat(size) - s.height) / 2,
@@ -50,6 +56,12 @@ func render(size: Int) -> Data {
 
     NSGraphicsContext.restoreGraphicsState()
     return rep.representation(using: .png, properties: [:])!
+}
+
+if aboutOnly {
+    try render(size: 512, includesShadow: false, includesGlyph: false).write(to: output)
+    print("Wrote \(output.path)")
+    exit(0)
 }
 
 let iconset = FileManager.default.temporaryDirectory.appendingPathComponent("AppIcon.iconset")

@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Preserve byte offsets in bundled vector artwork.
+*.pdf binary

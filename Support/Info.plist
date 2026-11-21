@@ -26,6 +26,8 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>MenuRemoteBitcoinAddress</key>
+	<string>bc1qh6f47dnuwkqke8ptvuuvhy00hzxc2lj4ttw4j5</string>
 	<key>SUFeedURL</key>
 	<string>https://github.com/nickkjolsing/menuremote/releases/latest/download/appcast.xml</string>
 	<key>SUEnableAutomaticChecks</key>

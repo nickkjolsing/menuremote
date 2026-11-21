@@ -13,7 +13,7 @@ from verify_release import FEED_URL, SPARKLE_NS, verify
 
 
 def make_package(archive, revision, version="1.0.0", executable=True, cpu=0x0100000C,
-                 automatic_updates=False, include_updater=True):
+                 automatic_updates=False, include_updater=True, omit_resource=None):
     root = "MenuRemote.app/Contents/"
     with ZipFile(archive, "w") as bundle:
         bundle.writestr(root + "Info.plist", plistlib.dumps({
@@ -32,8 +32,9 @@ def make_package(archive, revision, version="1.0.0", executable=True, cpu=0x0100
         binary = ZipInfo(root + "MacOS/MenuRemote")
         binary.external_attr = (0o100755 if executable else 0o100644) << 16
         bundle.writestr(binary, struct.pack("<II", 0xFEEDFACF, cpu))
-        for resource in ("atv_bridge.py", "AppIcon.icns", "LICENSE"):
-            bundle.writestr(root + "Resources/" + resource, b"sample")
+        for resource in ("atv_bridge.py", "AppIcon.icns", "AboutLogoBackground.png", "BitcoinMark.pdf", "LICENSE"):
+            if resource != omit_resource:
+                bundle.writestr(root + "Resources/" + resource, b"sample")
         if include_updater:
             for name in ("Sparkle", "Autoupdate", "Updater.app/Contents/MacOS/Updater"):
                 component = ZipInfo(root + "Frameworks/Sparkle.framework/Versions/B/" + name)
@@ -68,6 +69,13 @@ class ReleaseIntegrityTests(unittest.TestCase):
     def test_valid_package(self):
         self.package()
         verify(self.archive, "1.0.0", self.revision)
+
+    def test_missing_about_artwork_is_rejected(self):
+        for resource in ("AboutLogoBackground.png", "BitcoinMark.pdf"):
+            with self.subTest(resource=resource):
+                make_package(self.archive, self.revision, omit_resource=resource)
+                with self.assertRaises(KeyError):
+                    verify(self.archive, "1.0.0", self.revision)
 
     def test_modified_download_is_rejected(self):
         self.package()

@@ -35,7 +35,7 @@ def verify(archive, version, revision, require_appcast=False):
         # A thin 64-bit Mach-O header followed by CPU_TYPE_ARM64.
         if bundle.read(executable)[:8] != struct.pack("<II", 0xFEEDFACF, 0x0100000C):
             raise ValueError("App executable is not an Apple silicon Mach-O binary")
-        for resource in ("atv_bridge.py", "AppIcon.icns", "LICENSE"):
+        for resource in ("atv_bridge.py", "AppIcon.icns", "AboutLogoBackground.png", "BitcoinMark.pdf", "LICENSE"):
             if not bundle.read(root + "Resources/" + resource):
                 raise ValueError(f"Empty app resource: {resource}")
         if info.get("SUFeedURL") != FEED_URL:

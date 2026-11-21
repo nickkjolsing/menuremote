@@ -51,6 +51,7 @@ python3 -m venv .venv
 .venv/bin/python -m unittest discover -s tests -v
 bash scripts/test_remote_model.sh
 bash scripts/package_release.sh
+bash scripts/test_text_entry.sh
 python3 scripts/test_updater.py
 ```
 

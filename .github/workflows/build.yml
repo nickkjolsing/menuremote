@@ -38,6 +38,8 @@ jobs:
         run: bash scripts/package_release.sh
       - name: Test Sparkle update installation
         run: python3 scripts/test_updater.py
+      - name: Test native text entry
+        run: bash scripts/test_text_entry.sh
       - name: Save verified package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

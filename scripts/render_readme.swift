@@ -104,8 +104,13 @@ struct ReadmeArtwork {
         let menuRect = NSRect(x: 1036, y: panel.maxY + 16, width: 54, height: 34)
         color(0xd6d1df).setFill()
         NSBezierPath(roundedRect: menuRect, xRadius: 8, yRadius: 8).fill()
-        NSImage(systemSymbolName: "appletv.fill", accessibilityDescription: nil)?
-            .draw(in: menuRect.insetBy(dx: 15, dy: 7))
+        if let remote = NSImage(systemSymbolName: "appletvremote.gen4", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 16, weight: .medium)) {
+            let height: CGFloat = 20
+            let width = remote.size.width * height / remote.size.height
+            remote.draw(in: NSRect(x: menuRect.midX - width / 2, y: menuRect.midY - height / 2,
+                                   width: width, height: height))
+        }
         text("Actual interface · Sample playback", x: 775, y: 72,
              size: 14, weight: .regular, ink: color(0x68656e))
 

@@ -7,6 +7,8 @@ struct AppleTVDevice: Identifiable, Equatable {
     let name: String
     let address: String
     let model: String
+    let software: String?
+    let softwareBuild: String?
     let paired: Bool
 
     init?(_ dict: [String: Any]) {
@@ -15,6 +17,8 @@ struct AppleTVDevice: Identifiable, Equatable {
         name = dict["name"] as? String ?? "Apple TV"
         address = dict["address"] as? String ?? ""
         model = dict["model"] as? String ?? ""
+        software = dict["software"] as? String
+        softwareBuild = dict["build"] as? String
         paired = dict["paired"] as? Bool ?? false
     }
 }
@@ -90,7 +94,6 @@ final class RemoteModel: ObservableObject {
 
     @Published var phase: Phase = .settingUp("Starting…")
     @Published var devices: [AppleTVDevice] = []
-    @Published var otherDevices: [AppleTVDevice] = []
     @Published var scanning = false
     @Published var scanError: String?
     @Published var pairing: Pairing?
@@ -101,9 +104,20 @@ final class RemoteModel: ObservableObject {
     @Published var volumeAvailable = false
     @Published var powerOn: Bool?
     @Published var lastError: String?
+    @Published var keyboardAvailable = false
+    @Published var keyboardFocused = false
+    @Published private(set) var textFocusRequest = UUID()
+    @Published var textDraft = ""
+    @Published var textSending = false
+    @Published var textError: String?
+    @Published var textSent = false
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     @AppStorage("deviceID") private var savedDeviceID: String?
+    private let preferences: UserDefaults
+    private(set) var textRequestID: String?
+    private var textTimeoutTask: Task<Void, Never>?
+    private var textConfirmationTask: Task<Void, Never>?
 
     private let bridge = BridgeProcess()
     private var restartAttempts = 0
@@ -118,10 +132,20 @@ final class RemoteModel: ObservableObject {
 
     var isConnected: Bool { phase == .connected }
     var hasSavedDevice: Bool { savedDeviceID != nil }
+    var needsTextEntry: Bool { isConnected && keyboardAvailable && keyboardFocused }
+    var canSendText: Bool {
+        needsTextEntry && !textSending
+            && !textDraft.isEmpty && textDraft.unicodeScalars.count <= 4096
+    }
 
     // Artwork rendering uses sample data without starting setup or network discovery.
     init(startAutomatically: Bool = true, defaults: UserDefaults? = nil) {
+        preferences = defaults ?? .standard
         _savedDeviceID = AppStorage("deviceID", store: defaults)
+        if let id = savedDeviceID,
+           let names = preferences.dictionary(forKey: "deviceNames") as? [String: String] {
+            deviceName = names[id] ?? "Apple TV"
+        }
         bridge.onEvent = { [weak self] event in self?.handle(event) }
         bridge.onExit = { [weak self] status in self?.bridgeExited(status) }
         if startAutomatically {
@@ -155,6 +179,7 @@ final class RemoteModel: ObservableObject {
 
     private func bridgeExited(_ status: Int32) {
         bridgeConnected = false
+        resetKeyboard()
         restartAttempts += 1
         guard restartAttempts <= 3 else {
             phase = .setupFailed("The pyatv helper keeps crashing (exit \(status)). See ~/Library/Logs/MenuRemote.log.")
@@ -188,7 +213,6 @@ final class RemoteModel: ObservableObject {
             scanning = false
             scanError = nil
             devices = (e["devices"] as? [[String: Any]] ?? []).compactMap(AppleTVDevice.init)
-            otherDevices = (e["other_devices"] as? [[String: Any]] ?? []).compactMap(AppleTVDevice.init)
         case "connecting":
             if !choosingDevice && !isConnected { phase = .connecting(deviceName) }
         case "connected":
@@ -198,6 +222,7 @@ final class RemoteModel: ObservableObject {
             if let device = (e["device"] as? [String: Any]).flatMap(AppleTVDevice.init) {
                 deviceName = device.name
                 savedDeviceID = device.id
+                remember(device)
             }
             pairing = nil
             phase = .connected
@@ -209,10 +234,17 @@ final class RemoteModel: ObservableObject {
             }
         case "asleep":
             bridgeConnected = false
+            resetKeyboard()
+            if !choosingDevice,
+               let device = (e["device"] as? [String: Any]).flatMap(AppleTVDevice.init) {
+                deviceName = device.name
+                remember(device)
+            }
             if !choosingDevice { phase = .asleep }
             powerOn = false
         case "disconnected":
             bridgeConnected = false
+            resetKeyboard()
             if !choosingDevice && (e["reason"] as? String) != "user" {
                 phase = .disconnected("Connection lost")
             }
@@ -236,9 +268,23 @@ final class RemoteModel: ObservableObject {
             volume = (e["level"] as? NSNumber)?.doubleValue
         case "power":
             if e["known"] as? Bool ?? true { powerOn = e["on"] as? Bool }
+        case "keyboard":
+            guard isConnected && !choosingDevice else { break }
+            keyboardAvailable = e["available"] as? Bool ?? false
+            keyboardFocused = e["focused"] as? Bool ?? false
+        case "text_sent":
+            guard let request = e["request"] as? String, request == textRequestID else { break }
+            finishTextRequest()
+            textDraft = ""
+            showTextConfirmation()
+            textError = nil
         case "error":
             let message = e["message"] as? String ?? "Unknown error"
-            if e["command"] as? String == "scan" {
+            if e["command"] as? String == "text" {
+                guard let request = e["request"] as? String, request == textRequestID else { break }
+                finishTextRequest()
+                textError = message
+            } else if e["command"] as? String == "scan" {
                 scanning = false
                 scanError = message
             } else if pairing != nil, ["pair_begin", "pair_pin"].contains(e["command"] as? String) {
@@ -283,7 +329,14 @@ final class RemoteModel: ObservableObject {
 
     // MARK: - Devices & pairing
 
+    private func remember(_ device: AppleTVDevice) {
+        var names = preferences.dictionary(forKey: "deviceNames") as? [String: String] ?? [:]
+        names[device.id] = device.name
+        preferences.set(names, forKey: "deviceNames")
+    }
+
     func showDevicePicker() {
+        resetKeyboard(clearDraft: true)
         phase = .choosingDevice
         scan()
     }
@@ -296,13 +349,19 @@ final class RemoteModel: ObservableObject {
 
     func closeDevicePicker() {
         if bridgeConnected {
+            if let id = savedDeviceID,
+               let names = preferences.dictionary(forKey: "deviceNames") as? [String: String] {
+                deviceName = names[id] ?? deviceName
+            }
             phase = .connected
+            bridge.send(["cmd": "refresh"])
         } else {
             reconnect()
         }
     }
 
     func choose(_ device: AppleTVDevice) {
+        resetKeyboard(clearDraft: true)
         deviceName = device.name
         if device.paired {
             savedDeviceID = device.id
@@ -337,8 +396,68 @@ final class RemoteModel: ObservableObject {
 
     func reconnect() {
         guard let id = savedDeviceID else { return showDevicePicker() }
+        resetKeyboard()
         phase = .connecting(deviceName)
         bridge.send(["cmd": "connect", "id": id])
+    }
+
+    // MARK: - Text entry
+
+    func focusTextEntry() {
+        guard needsTextEntry else { return }
+        textFocusRequest = UUID()
+    }
+
+    func sendText() {
+        guard canSendText, let id = savedDeviceID else { return }
+        let request = UUID().uuidString
+        textRequestID = request
+        textSending = true
+        textError = nil
+        clearTextConfirmation()
+        bridge.send(["cmd": "text", "text": textDraft, "request": request, "device_id": id])
+        textTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(12))
+            guard !Task.isCancelled, let self, self.textRequestID == request else { return }
+            self.finishTextRequest()
+            self.textError = "Couldn't confirm text was sent. Check the TV before trying again."
+        }
+    }
+
+    private func finishTextRequest() {
+        textTimeoutTask?.cancel()
+        textTimeoutTask = nil
+        textRequestID = nil
+        textSending = false
+    }
+
+    private func showTextConfirmation() {
+        clearTextConfirmation()
+        textSent = true
+        textConfirmationTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.6))
+            guard !Task.isCancelled else { return }
+            self?.textSent = false
+            self?.textConfirmationTask = nil
+        }
+    }
+
+    private func clearTextConfirmation() {
+        textConfirmationTask?.cancel()
+        textConfirmationTask = nil
+        textSent = false
+    }
+
+    private func resetKeyboard(clearDraft: Bool = false) {
+        if textSending { textError = "Connection changed. Check the TV before sending again." }
+        finishTextRequest()
+        keyboardAvailable = false
+        keyboardFocused = false
+        clearTextConfirmation()
+        if clearDraft {
+            textDraft = ""
+            textError = nil
+        }
     }
 
     // MARK: - Playback

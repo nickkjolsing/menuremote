@@ -39,7 +39,7 @@ def device(identifier="new-tv", name="Apple TV 4K", model=DeviceModel.Unknown,
 
 class DeviceSuggestionTests(unittest.TestCase):
     def test_remote_services_work_without_known_models_or_software_versions(self):
-        for raw_model in ("AppleTV18,1", "AppleTV999,1", "FutureHardware1,1", None):
+        for raw_model in ("AppleTV18,1", "AppleTV999,1"):
             for os in OperatingSystem:
                 for version in (None, "1.0", "99.7", "future-version"):
                     with self.subTest(raw_model=raw_model, os=os, version=version):
@@ -51,7 +51,7 @@ class DeviceSuggestionTests(unittest.TestCase):
         self.assertTrue(bridge.is_remote_candidate(device(
             model=DeviceModel.AppleTV4KGen3, raw_model="AppleTV14,1")))
 
-    def test_streaming_and_unsupported_companion_services_are_not_suggested(self):
+    def test_non_tv_receivers_are_not_suggested(self):
         for model, raw_model, os in [
             (DeviceModel.HomePod, "AudioAccessory1,1", OperatingSystem.TvOS),
             (DeviceModel.HomePodMini, "AudioAccessory5,1", OperatingSystem.TvOS),
@@ -59,7 +59,6 @@ class DeviceSuggestionTests(unittest.TestCase):
             (DeviceModel.Unknown, "Mac17,9", OperatingSystem.MacOS),
             (DeviceModel.Unknown, "Receiver1,1", OperatingSystem.Unknown),
             (DeviceModel.Unknown, None, OperatingSystem.Unknown),
-            (DeviceModel.Gen3, "AppleTV3,2", OperatingSystem.Legacy),
         ]:
             with self.subTest(model=model, raw_model=raw_model):
                 # Even a device named Apple TV needs an advertised remote service.
@@ -67,9 +66,24 @@ class DeviceSuggestionTests(unittest.TestCase):
                     model=model, raw_model=raw_model, os=os,
                     companion_pairing=PairingRequirement.Unsupported)))
 
-    def test_mrp_service_is_suggested_without_companion_or_model_metadata(self):
-        self.assertTrue(bridge.is_remote_candidate(device(
-            raw_model=None, protocols=(Protocol.MRP,))))
+    def test_remote_services_alone_do_not_identify_an_apple_tv(self):
+        for raw_model in (None, "FutureHardware1,1", "Mac17,9", "AudioAccessory5,1"):
+            for protocols in ((Protocol.MRP,), (Protocol.AirPlay, Protocol.Companion)):
+                self.assertFalse(bridge.is_remote_candidate(device(
+                    name="Apple TV", raw_model=raw_model, protocols=protocols)))
+
+    def test_known_non_tv_devices_are_excluded_even_with_remote_services(self):
+        for model, raw_model, os in [
+            (DeviceModel.HomePod, "AudioAccessory1,1", OperatingSystem.TvOS),
+            (DeviceModel.HomePodMini, "AudioAccessory5,1", OperatingSystem.TvOS),
+            (DeviceModel.HomePodGen2, "AudioAccessory6,1", OperatingSystem.TvOS),
+            (DeviceModel.Unknown, "MacBookPro18,1", OperatingSystem.MacOS),
+            (DeviceModel.Unknown, "Mac17,9", OperatingSystem.MacOS),
+            (DeviceModel.Music, None, OperatingSystem.MacOS),
+        ]:
+            with self.subTest(model=model, raw_model=raw_model):
+                self.assertFalse(bridge.is_remote_candidate(device(
+                    model=model, raw_model=raw_model, os=os)))
 
     def test_disabled_remote_services_are_not_suggested_or_paired(self):
         conf = device()
@@ -78,9 +92,9 @@ class DeviceSuggestionTests(unittest.TestCase):
         self.assertFalse(bridge.is_remote_candidate(conf))
         self.assertEqual(bridge.services_to_pair(conf), [])
 
-    def test_existing_companion_credentials_work_when_pairing_is_unavailable(self):
+    def test_identified_tv_is_kept_even_if_pairing_is_temporarily_disabled(self):
         conf = device(companion_pairing=PairingRequirement.Disabled)
-        self.assertFalse(bridge.is_remote_candidate(conf))
+        self.assertTrue(bridge.is_remote_candidate(conf))
         conf.get_service(Protocol.Companion).credentials = "existing-credentials"
         self.assertTrue(bridge.is_remote_candidate(conf))
 
@@ -102,18 +116,15 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
                 await self.bridge.cmd_scan({"cmd": "scan"})
 
         self.assertIsNone(scan.call_args.kwargs["identifier"])
-        emit.assert_any_call("devices", devices=[{
-            "id": "new-tv", "name": "Apple TV 4K", "address": "192.0.2.1",
-            "model": "AppleTV18,1", "paired": False,
-        }], other_devices=[])
+        emit.assert_any_call("devices", devices=[bridge.device_dict(new)])
         self.assertIs(self.bridge.configs["new-tv"], new)
 
-    async def test_unclassified_devices_remain_selectable_and_reconnectable(self):
+    async def test_unclassified_devices_are_hidden_but_saved_connections_still_work(self):
         unknown = device(raw_model=None, protocols=(Protocol.AirPlay,))
         with patch.object(bridge.pyatv, "scan", new=AsyncMock(return_value=[unknown])) as scan:
             with patch.object(bridge, "emit") as emit:
                 await self.bridge.cmd_scan({"cmd": "scan"})
-            emit.assert_any_call("devices", devices=[], other_devices=[bridge.device_dict(unknown)])
+            emit.assert_any_call("devices", devices=[])
             self.assertIs(self.bridge.configs[unknown.identifier], unknown)
             # Connection scans must not reapply picker suggestions as a filter.
             self.assertEqual(await self.bridge.scan(unknown.identifier), [unknown])
@@ -123,6 +134,35 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
             await self.bridge.cmd_pair_begin({"id": unknown.identifier})
         self.assertIs(self.bridge.pair_conf, unknown)
         self.assertEqual(self.bridge.pair_queue, [Protocol.AirPlay])
+
+    async def test_scan_does_not_offer_macs_or_homepods_as_tvs(self):
+        tv = device()
+        mac = device("mac", raw_model="Mac17,9", os=OperatingSystem.MacOS)
+        speaker = device("speaker", model=DeviceModel.HomePodMini, raw_model="AudioAccessory5,1")
+        with patch.object(bridge.pyatv, "scan", new=AsyncMock(return_value=[tv, mac, speaker])):
+            with patch.object(bridge, "emit") as emit:
+                await self.bridge.cmd_scan({})
+        emit.assert_any_call("devices", devices=[bridge.device_dict(tv)])
+
+    async def test_device_details_use_generation_and_reported_software(self):
+        for raw_model, expected in [
+            ("AppleTV18,1", "Apple TV 4K (4th generation)"),
+            ("AppleTV14,1", "Apple TV 4K (3rd generation)"),
+            ("AppleTV11,1", "Apple TV 4K (2nd generation)"),
+            ("AppleTV6,2", "Apple TV 4K (1st generation)"),
+            ("AppleTV5,3", "Apple TV HD"),
+            ("AppleTV999,1", "Apple TV"),
+        ]:
+            with self.subTest(raw_model=raw_model):
+                details = bridge.device_dict(device(raw_model=raw_model, version="27.1"))
+                self.assertEqual(details["model"], expected)
+                self.assertEqual(details["software"], "tvOS 27.1")
+
+    async def test_missing_or_approximate_software_versions_are_not_invented(self):
+        self.assertIsNone(bridge.device_dict(device())["software"])
+        self.assertIsNone(bridge.device_dict(device(version="23.x"))["software"])
+        self.assertEqual(bridge.device_dict(device(raw_model="AppleTV3,2", version="7.9"))["software"],
+                         "Apple TV Software 7.9")
 
     async def test_discovery_keeps_only_devices_with_a_usable_identifier(self):
         unidentified = device(protocols=())

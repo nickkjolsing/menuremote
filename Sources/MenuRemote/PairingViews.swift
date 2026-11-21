@@ -2,54 +2,61 @@ import SwiftUI
 
 struct DevicePickerView: View {
     @EnvironmentObject var model: RemoteModel
-    @State private var showOtherDevices = false
-
-    private var visibleDevices: [AppleTVDevice] {
-        model.devices + (showOtherDevices ? model.otherDevices : [])
-    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                if model.hasSavedDevice {
+                    Button { model.closeDevicePicker() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 26, height: 26)
+                            .background(.primary.opacity(0.055), in: Circle())
+                            .overlay(Circle().strokeBorder(.primary.opacity(0.07), lineWidth: 0.5))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Back to Remote")
+                    .accessibilityLabel("Back to Remote")
+                }
                 Text("Choose your Apple TV").font(.headline)
                 Spacer()
                 if model.scanning {
-                    ProgressView().controlSize(.small)
+                    ProgressView().controlSize(.mini).frame(width: 26, height: 26)
                 } else {
-                    Button { model.scan() } label: { Image(systemName: "arrow.clockwise") }
-                        .buttonStyle(.borderless)
+                    Button { model.scan() } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12))
+                            .frame(width: 26, height: 26)
+                    }
+                        .buttonStyle(.plain)
                         .help("Scan again")
+                        .accessibilityLabel("Scan for Apple TVs")
                 }
             }
 
-            if visibleDevices.isEmpty {
-                Text(model.scanning
-                     ? "Looking for Apple TVs on your network…"
-                     : "No Apple TVs found. Make sure it's on the same network, and that MenuRemote is allowed under System Settings › Privacy & Security › Local Network.")
-                    .font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            if model.devices.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "appletv")
+                        .font(.system(size: 26)).foregroundStyle(.tertiary)
+                    Text(model.scanning ? "Looking for Apple TVs…" : "No Apple TVs found")
+                        .font(.callout.weight(.medium))
+                    Text(model.scanning ? "Searching your local network" : "Keep your Apple TV on the same network and allow Local Network access in System Settings.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
             } else {
                 ScrollView {
                     VStack(spacing: 4) {
-                        ForEach(visibleDevices) { device in
+                        ForEach(model.devices) { device in
                             DeviceRow(device: device)
                         }
                     }
                 }
-                .frame(height: min(CGFloat(visibleDevices.count) * 60, 240))
-            }
-
-            if !model.otherDevices.isEmpty {
-                Button(showOtherDevices ? "Hide other devices" : "Show other devices (\(model.otherDevices.count))") {
-                    showOtherDevices.toggle()
-                }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                if showOtherDevices {
-                    Text("If your TV wasn't listed above, select it here. Some devices may not support remote control.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                .frame(height: min(CGFloat(model.devices.count) * 76 - 4, 268))
+                .padding(.horizontal, -8)
             }
 
             if let error = model.scanError {
@@ -58,15 +65,6 @@ struct DevicePickerView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack {
-                if model.hasSavedDevice {
-                    Button("Back") { model.closeDevicePicker() }.buttonStyle(.borderless)
-                }
-                CheckForUpdatesButton().buttonStyle(.borderless)
-                Spacer()
-                Button("Quit") { model.quit() }.buttonStyle(.borderless).foregroundStyle(.secondary)
-            }
-            .font(.caption)
         }
         .padding(16)
     }
@@ -79,24 +77,48 @@ private struct DeviceRow: View {
 
     var body: some View {
         Button { model.choose(device) } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "appletv.fill").font(.title3).frame(width: 28)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(device.name).font(.body.weight(.medium))
-                    Text("\(device.model) · \(device.address)").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Image(systemName: "appletv.fill").font(.title3).frame(width: 26)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(device.name).font(.body.weight(.medium)).lineLimit(1)
+                    Text(device.model).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                    HStack(spacing: 5) {
+                        if let software = device.software {
+                            detailTag(software)
+                        }
+                        if !device.address.isEmpty {
+                            detailTag(device.address)
+                                .fixedSize(horizontal: true, vertical: false)
+                        } else if device.software == nil {
+                            Text("Software version unavailable")
+                        }
+                    }
+                    .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                    .padding(.top, 3)
                 }
-                Spacer()
+                Spacer(minLength: 0)
                 Text(device.paired ? "Connect" : "Pair")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 10).padding(.vertical, 4)
                     .background(Capsule().fill(Color.accentColor.opacity(0.2)))
             }
-            .padding(8)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .frame(minHeight: 72)
             .background(RoundedRectangle(cornerRadius: 8).fill(.primary.opacity(hovering ? 0.08 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .help([device.name, device.model, device.software, device.softwareBuild.map { "Build \($0)" }, device.address]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"))
+    }
+
+    private func detailTag(_ text: String) -> some View {
+        Text(text)
+            .monospacedDigit()
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 4))
     }
 }
 

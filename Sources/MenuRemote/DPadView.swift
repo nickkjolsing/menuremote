@@ -20,38 +20,39 @@ struct DPadView: View {
 
     private var pad: some View {
         ZStack {
-            Circle().fill(.primary.opacity(0.08))
-            Circle().strokeBorder(.primary.opacity(0.12), lineWidth: 1)
+            Circle().fill(.primary.opacity(0.045))
+            Circle().strokeBorder(.primary.opacity(0.12), lineWidth: 0.7)
             VStack {
                 arrow("chevron.up", key: "up")
                 Spacer()
                 arrow("chevron.down", key: "down")
             }
-            .padding(6)
+            .padding(2)
             HStack {
                 arrow("chevron.left", key: "left")
                 Spacer()
                 arrow("chevron.right", key: "right")
             }
-            .padding(6)
+            .padding(2)
             Button { model.press("select") } label: {
-                Circle().fill(.primary.opacity(0.14))
-                    .frame(width: 50, height: 50)
-                    .overlay(Circle().strokeBorder(.primary.opacity(0.15)))
+                Circle().fill(LinearGradient(colors: [.primary.opacity(0.14), .primary.opacity(0.09)],
+                                             startPoint: .top, endPoint: .bottom))
+                    .frame(width: 52, height: 52)
+                    .overlay(Circle().strokeBorder(.primary.opacity(0.15), lineWidth: 0.7))
                     .contentShape(Circle())
             }
             .buttonStyle(SelectButtonStyle { model.press("select", hold: true) })
             .accessibilityLabel("Select")
             .help("Select (Return); press and hold for the context menu")
         }
-        .frame(width: 140, height: 140)
+        .frame(width: 144, height: 144)
     }
 
     private func arrow(_ symbol: String, key: String) -> some View {
         Button { model.press(key) } label: {
             Image(systemName: symbol)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.primary.opacity(0.65))
                 .frame(width: 36, height: 36)
                 .contentShape(Rectangle())
         }
@@ -72,13 +73,14 @@ private struct SelectButtonStyle: PrimitiveButtonStyle {
         let configuration: PrimitiveButtonStyleConfiguration
         let onHold: () -> Void
         @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @GestureState private var isPressed = false
 
         var body: some View {
             configuration.label
-                .scaleEffect(isPressed ? 0.92 : 1)
-                .opacity(isPressed ? 0.7 : 1)
-                .animation(.easeOut(duration: 0.1), value: isPressed)
+                .scaleEffect(!reduceMotion && isPressed ? 0.97 : 1)
+                .opacity(isPressed ? 0.9 : 1)
+                .animation(reduceMotion ? nil : .spring(response: 0.23, dampingFraction: 0.8), value: isPressed)
                 .gesture(
                     LongPressGesture(minimumDuration: 0.5)
                         .exclusively(before: TapGesture())
@@ -107,8 +109,10 @@ private struct PillButton: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.primary.opacity(0.85))
                 .frame(width: 44, height: 36)
-                .background(Capsule().fill(.primary.opacity(0.1)))
+                .background(Capsule().fill(.primary.opacity(0.065)))
+                .overlay(Capsule().strokeBorder(.primary.opacity(0.055), lineWidth: 0.5))
                 .contentShape(Capsule())
         }
         .buttonStyle(PressableStyle())
@@ -117,10 +121,13 @@ private struct PillButton: View {
 }
 
 private struct PressableStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.92 : 1)
-            .opacity(configuration.isPressed ? 0.7 : 1)
-            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+            .scaleEffect(!reduceMotion && configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.9 : 1)
+            .animation(reduceMotion ? nil : .spring(response: 0.23, dampingFraction: 0.8),
+                       value: configuration.isPressed)
     }
 }

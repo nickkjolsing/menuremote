@@ -11,6 +11,7 @@ swiftc -parse-as-library \
     -F "$SPARKLE_FRAMEWORKS" -framework Sparkle \
     -Xlinker -rpath -Xlinker "$SPARKLE_FRAMEWORKS" \
     Sources/MenuRemote/AppUpdater.swift \
+    Sources/MenuRemote/AboutWindow.swift \
     Sources/MenuRemote/Bridge.swift \
     Sources/MenuRemote/RemoteModel.swift \
     Sources/MenuRemote/DPadView.swift \

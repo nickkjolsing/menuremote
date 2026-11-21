@@ -12,6 +12,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate {
     private var panel: RemotePanel!
     private var hostingView: SizeReportingHostingView!
     private var outsideClickMonitor: Any?
+    private var keyboardNotifications: KeyboardNotifications!
     private var contentSize = CGSize.zero
     private var cancellables = Set<AnyCancellable>()
 
@@ -19,15 +20,46 @@ final class StatusItemController: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePanel)
-        setIcon(playing: false)
+        setIcon()
 
         ProcessInfo.processInfo.disableAutomaticTermination("Menu bar app stays running")
 
         hostingView = SizeReportingHostingView(rootView: AnyView(
             PanelContent().environmentObject(model).environmentObject(updater)
+                .environment(\.showAbout) { [weak self] in
+                    guard let self else { return }
+                    self.closePanel()
+                    AboutWindowController.shared.show(
+                        updateControl: AboutUpdateButton().environmentObject(self.updater)
+                    )
+                }
         ))
         hostingView.onSizeChange = { [weak self] size in self?.resize(to: size) }
         panel = RemotePanel(content: hostingView)
+        keyboardNotifications = KeyboardNotifications()
+        keyboardNotifications.shouldPresent = { [weak self] in
+            guard let self else { return false }
+            return self.model.needsTextEntry && !self.panel.isVisible
+        }
+        keyboardNotifications.onOpen = { [weak self] in
+            NSApp.activate(ignoringOtherApps: true)
+            self?.showPanel()
+        }
+        model.$phase.combineLatest(model.$keyboardAvailable, model.$keyboardFocused)
+            .map { phase, available, focused in phase == .connected && available && focused }
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] needed in
+                guard let self else { return }
+                self.statusItem.button?.toolTip = needed
+                    ? "MenuRemote — Type on \(self.model.deviceName)" : "MenuRemote"
+                if needed && !self.panel.isVisible {
+                    self.keyboardNotifications.show(for: self.model.deviceName)
+                } else {
+                    self.keyboardNotifications.clear()
+                }
+            }
+            .store(in: &cancellables)
         // SwiftUI doesn't reliably announce size changes, so re-measure whenever
         // state that can change the layout changes.
         model.objectWillChange
@@ -40,20 +72,15 @@ final class StatusItemController: NSObject, NSApplicationDelegate {
         updater.willCheckForUpdates = { [weak self] in self?.closePanel() }
         updater.start()
 
-        model.$nowPlaying.combineLatest(model.$phase)
-            .sink { [weak self] nowPlaying, phase in
-                self?.setIcon(playing: nowPlaying.isPlaying && phase == .connected)
-            }
-            .store(in: &cancellables)
-
         if CommandLine.arguments.contains("--show-panel") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.showPanel() }
         }
     }
 
-    private func setIcon(playing: Bool) {
-        let image = NSImage(systemSymbolName: playing ? "appletv.fill" : "appletv",
-                            accessibilityDescription: "MenuRemote")
+    private func setIcon() {
+        let image = NSImage(systemSymbolName: "appletvremote.gen4",
+                            accessibilityDescription: "MenuRemote")?
+            .withSymbolConfiguration(.init(pointSize: 16, weight: .medium))
         image?.isTemplate = true
         statusItem.button?.image = image
     }
@@ -76,7 +103,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate {
         panel.setFrame(NSRect(x: x, y: buttonRect.minY - 6 - size.height, width: size.width, height: size.height),
                        display: true)
         panel.makeKeyAndOrderFront(nil)
+        keyboardNotifications.clear()
+        // Opening the panel is explicit intent to type; TV events alone don't take focus.
+        DispatchQueue.main.async { [weak self] in self?.model.focusTextEntry() }
 
+        if let monitor = outsideClickMonitor { NSEvent.removeMonitor(monitor) }
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
             [weak self] _ in
             Task { @MainActor in self?.closePanel() }
@@ -113,6 +144,14 @@ final class StatusItemController: NSObject, NSApplicationDelegate {
         } else {
             panel.setFrame(frame, display: panel.isVisible)
         }
+    }
+}
+
+private struct AboutUpdateButton: View {
+    @EnvironmentObject private var updater: AppUpdater
+
+    var body: some View {
+        InfoUpdateButton(isEnabled: updater.canCheckForUpdates, action: updater.checkForUpdates)
     }
 }
 

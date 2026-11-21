@@ -12,6 +12,7 @@ A native macOS menu bar remote for Apple TV. See what's playing and control play
 
 - Artwork, playback progress, seeking, and 10-second skips
 - Direction pad, keyboard controls, volume, and sleep/wake
+- Send text from your Mac to the active text field on Apple TV
 - Automatic reconnect, device switching, and optional launch at login
 - Manual in-app updates from GitHub Releases
 
@@ -43,13 +44,21 @@ On first launch, MenuRemote uses uv to download Python 3.13 and install pyatv 0.
 
 ## Pair & play
 
-1. Click the Apple TV icon in your menu bar and select your TV.
+1. Click the remote icon in your menu bar and select your TV.
 2. Enter the four-digit code shown on the TV. A second code may be requested.
 3. Click the remote icon to expand the direction pad. Use **⋯** to switch TVs or enable **Launch at Login**.
 
 Click the center button to select, or press and hold it to open the focused item's context menu in apps that support one.
 
 Use **⋯ → Check for Updates…** to look for a newer release and choose whether to install it. Updates preserve your pairing credentials. Automatic checks and installation are disabled.
+
+Open **⋯ → About MenuRemote** for the app version, release notes, update checks, and Bitcoin receiving address. Click the address to copy it.
+
+The text composer appears automatically when a search or other compatible text field is active on Apple TV, and disappears when you leave it. If MenuRemote's panel is closed, a quiet **Apple TV Keyboard** notification lets you click to open it and type. macOS asks for notification permission the first time; you can change it in System Settings. Notifications don't make sounds or open the panel automatically.
+
+Type or paste on your Mac, then press **Return** or the send arrow. Text is appended to the TV's existing text; it doesn't submit the TV's form. Use the eye button to hide what you're typing. Text entry requires a compatible TV field and the Companion connection. Drafts stay in memory and clear when you switch TVs; MenuRemote doesn't fetch the TV's field contents.
+
+MenuRemote remembers your TV's name between launches and refreshes it when reconnecting.
 
 Keyboard controls work while the panel is open and focused:
 
@@ -66,7 +75,7 @@ Volume, artwork, and seeking depend on the TV app and audio output.
 ## Troubleshooting
 
 - **No TV found?** Check the local network connection and allow MenuRemote under **System Settings → Privacy & Security → Local Network**, if listed. Try scanning again.
-- **TV missing from the list?** Choose **Show other devices** to see every discovered device. MenuRemote suggests TVs by their remote services; an unfamiliar model or software version doesn't prevent selection.
+- **TV missing from the list?** Wake your Apple TV and scan again. The picker shows identified Apple TV hardware and filters out other receivers. New Apple TV model identifiers remain discoverable. Hardware generations, reported software versions, and IP addresses appear below each TV's name; hover for details and the software build.
 - **Setup failed?** Confirm uv is installed, then click **Retry**.
 - **Connection lost?** Use **⋯ → Reconnect**. Logs: `~/Library/Logs/MenuRemote.log`.
 

@@ -75,18 +75,21 @@ enum RemoteModelTests {
         }
     }
 
-    static func testUnclassifiedDevicesRemainSelectable() {
+    static func testDeviceListRefreshesAndReadsHardwareAndSoftware() {
         withModel { model in
             model.showDevicePicker()
-            model.handle(["event": "devices", "devices": [], "other_devices": [[
+            model.handle(["event": "devices", "devices": [[
                 "id": "future-tv", "name": "Living Room", "paired": false,
+                "model": "Apple TV 4K (4th generation)", "software": "tvOS 27.1", "build": "24J123",
             ]]])
-            precondition(model.devices.isEmpty)
-            precondition(model.otherDevices.map(\.id) == ["future-tv"])
-            model.choose(model.otherDevices[0])
+            precondition(model.devices.map(\.id) == ["future-tv"])
+            precondition(model.devices[0].model == "Apple TV 4K (4th generation)")
+            precondition(model.devices[0].software == "tvOS 27.1")
+            precondition(model.devices[0].softwareBuild == "24J123")
+            model.choose(model.devices[0])
             precondition(model.pairing?.device.id == "future-tv")
             model.handle(["event": "devices", "devices": []])
-            precondition(model.otherDevices.isEmpty, "Old fallback results should clear on rescan")
+            precondition(model.devices.isEmpty, "Old results should clear on rescan")
         }
     }
 
@@ -108,12 +111,107 @@ enum RemoteModelTests {
         }
     }
 
+    static func testDeviceNamesSurviveRelaunchAndRefreshOnConnection() {
+        let suite = "MenuRemoteTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = RemoteModel(startAutomatically: false, defaults: defaults)
+        model.handle(["event": "connected", "device": oldDevice])
+        let restored = RemoteModel(startAutomatically: false, defaults: defaults)
+        precondition(restored.deviceName == "Apple TV 4K")
+        restored.handle(["event": "connected", "device": ["id": "old-tv", "name": "Living Room"]])
+        let renamed = RemoteModel(startAutomatically: false, defaults: defaults)
+        precondition(renamed.deviceName == "Living Room")
+    }
+
+    static func testTextNeedsCapabilityAndFocusAndOnlyClearsOnMatchingAcknowledgement() {
+        withModel { model in
+            model.handle(["event": "connected", "device": oldDevice])
+            model.textDraft = "Café 🎬"
+            precondition(!model.canSendText)
+            model.handle(["event": "keyboard", "available": true, "focused": false])
+            precondition(!model.canSendText)
+            model.handle(["event": "keyboard", "available": true, "focused": true])
+            precondition(model.canSendText)
+            model.sendText()
+            let request = model.textRequestID!
+            precondition(model.textSending && !model.canSendText)
+            precondition(model.textDraft == "Café 🎬")
+            model.handle(["event": "text_sent", "request": "old-request"])
+            precondition(model.textSending && !model.textDraft.isEmpty)
+            model.handle(["event": "text_sent", "request": request])
+            precondition(!model.textSending && model.textDraft.isEmpty && model.textSent)
+        }
+    }
+
+    static func testTextFailureRetainsDraftAndDisconnectInvalidatesAcknowledgements() {
+        withModel { model in
+            model.handle(["event": "connected", "device": oldDevice])
+            model.handle(["event": "keyboard", "available": true, "focused": true])
+            model.textDraft = "Keep this draft"
+            model.sendText()
+            model.handle(["event": "error", "command": "text",
+                          "request": model.textRequestID!, "message": "Try again"])
+            precondition(!model.textSending && model.textError == "Try again")
+            precondition(model.textDraft == "Keep this draft")
+            model.sendText()
+            let request = model.textRequestID!
+            model.handle(["event": "disconnected"])
+            model.handle(["event": "text_sent", "request": request])
+            precondition(!model.canSendText && !model.textSending)
+            precondition(model.textDraft == "Keep this draft")
+        }
+    }
+
+    static func testSwitchingDevicesClearsDraftAndIgnoresOldKeyboardEvents() {
+        withModel { model in
+            model.handle(["event": "connected", "device": oldDevice])
+            model.handle(["event": "keyboard", "available": true, "focused": true])
+            model.textDraft = String(repeating: "a", count: 4097)
+            precondition(!model.canSendText)
+            model.textDraft = "Private draft"
+            model.sendText()
+            let request = model.textRequestID!
+            model.showDevicePicker()
+            model.handle(["event": "keyboard", "available": true, "focused": true])
+            model.handle(["event": "text_sent", "request": request])
+            precondition(!model.keyboardAvailable && !model.textSending)
+            precondition(model.textDraft.isEmpty && !model.textSent)
+        }
+    }
+
+    static func testTextEntryFollowsTVFocusAndStopsWhenConnectionIsLost() {
+        withModel { model in
+            model.handle(["event": "connected", "device": oldDevice])
+            model.handle(["event": "keyboard", "available": true, "focused": false])
+            precondition(!model.needsTextEntry)
+            let initialRequest = model.textFocusRequest
+            model.handle(["event": "keyboard", "available": true, "focused": true])
+            precondition(model.needsTextEntry)
+            precondition(model.textFocusRequest == initialRequest, "TV events must not take keyboard focus")
+            model.focusTextEntry()
+            precondition(model.textFocusRequest != initialRequest, "Explicit opening should allow typing")
+            model.handle(["event": "keyboard", "available": true, "focused": false])
+            precondition(!model.needsTextEntry)
+            model.handle(["event": "keyboard", "available": false, "focused": true])
+            precondition(!model.needsTextEntry, "Unsupported fields should not reveal a composer")
+            model.handle(["event": "keyboard", "available": true, "focused": true])
+            model.handle(["event": "disconnected"])
+            precondition(!model.needsTextEntry)
+        }
+    }
+
     static func main() {
         testOldConnectionEventsDoNotDismissDevicePicker()
         testOldConnectionDoesNotCancelReplacementPairing()
         testScanFailureStopsSpinnerAndAllowsRetry()
-        testUnclassifiedDevicesRemainSelectable()
+        testDeviceListRefreshesAndReadsHardwareAndSoftware()
         testVariableSpeedPlaybackShowsPauseAndCanToggle()
-        print("All 5 remote model tests passed")
+        testDeviceNamesSurviveRelaunchAndRefreshOnConnection()
+        testTextNeedsCapabilityAndFocusAndOnlyClearsOnMatchingAcknowledgement()
+        testTextFailureRetainsDraftAndDisconnectInvalidatesAcknowledgements()
+        testSwitchingDevicesClearsDraftAndIgnoresOldKeyboardEvents()
+        testTextEntryFollowsTVFocusAndStopsWhenConnectionIsLost()
+        print("All 10 remote model tests passed")
     }
 }

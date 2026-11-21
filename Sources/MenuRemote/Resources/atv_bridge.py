@@ -10,6 +10,7 @@ import base64
 import json
 import logging
 import os
+import re
 import sys
 import time
 from copy import deepcopy
@@ -18,14 +19,16 @@ import pyatv
 from pyatv import exceptions
 from pyatv.const import (
     DeviceState,
+    DeviceModel,
     FeatureName,
     FeatureState,
     InputAction,
+    KeyboardFocusState,
     PairingRequirement,
     PowerState,
     Protocol,
 )
-from pyatv.interface import AudioListener, DeviceListener, PowerListener, PushListener, RemoteControl
+from pyatv.interface import AudioListener, DeviceListener, KeyboardListener, PowerListener, PushListener, RemoteControl
 from pyatv.storage.file_storage import FileStorage
 
 LOG = logging.getLogger("atv_bridge")
@@ -51,6 +54,30 @@ FEATURES = {
     "artwork": FeatureName.Artwork,
 }
 
+TV_MODEL_NAMES = {
+    DeviceModel.AppleTVGen1: "Apple TV (1st generation)",
+    DeviceModel.Gen2: "Apple TV (2nd generation)",
+    DeviceModel.Gen3: "Apple TV (3rd generation)",
+    DeviceModel.Gen4: "Apple TV HD",
+    DeviceModel.Gen4K: "Apple TV 4K (1st generation)",
+    DeviceModel.AppleTV4KGen2: "Apple TV 4K (2nd generation)",
+    DeviceModel.AppleTV4KGen3: "Apple TV 4K (3rd generation)",
+}
+# Hardware identifiers, not software-version gates. Unknown future TVs remain usable.
+# https://appledb.dev/device-selection/Apple-TV.html
+# https://support.apple.com/en-us/149359
+TV_HARDWARE_NAMES = {
+    "AppleTV1,1": "Apple TV (1st generation)",
+    "AppleTV2,1": "Apple TV (2nd generation)",
+    "AppleTV3,1": "Apple TV (3rd generation)",
+    "AppleTV3,2": "Apple TV (3rd generation)",
+    "AppleTV5,3": "Apple TV HD",
+    "AppleTV6,2": "Apple TV 4K (1st generation)",
+    "AppleTV11,1": "Apple TV 4K (2nd generation)",
+    "AppleTV14,1": "Apple TV 4K (3rd generation)",
+    "AppleTV18,1": "Apple TV 4K (4th generation)",
+}
+
 
 def emit(event, **payload):
     sys.stdout.write(json.dumps({"event": event, **payload}) + "\n")
@@ -58,20 +85,20 @@ def emit(event, **payload):
 
 
 def is_remote_candidate(conf):
-    """Suggest devices by remote services, independently of model/OS metadata.
+    """Show identified Apple TV hardware, including models newer than pyatv.
 
-    AirPlay alone also describes speakers and Macs. Companion must advertise
-    pairing we support (or already have credentials); MRP is a remote service.
-    This is only a picker suggestion: other devices remain selectable too.
+    AirPlay, MRP and Companion also occur on other devices. Neither service
+    presence nor a user-assigned name is proof that a receiver is an Apple TV.
+    This filter applies only to the picker, never to saved-device reconnects.
     """
-    return any(
-        s.enabled and (
-            s.protocol == Protocol.MRP
-            or (s.protocol == Protocol.Companion
-                and (s.pairing in NEEDS_PAIRING or s.credentials))
-        )
-        for s in conf.services
-    )
+    if not any(s.enabled for s in conf.services):
+        return False
+    info = conf.device_info
+    if info.model in TV_MODEL_NAMES:
+        return True
+    if info.model != DeviceModel.Unknown:
+        return False
+    return bool(re.fullmatch(r"AppleTV\d+,\d+", info.raw_model or "", re.IGNORECASE))
 
 
 def services_to_pair(conf):
@@ -87,16 +114,33 @@ def is_paired(conf):
 
 
 def device_dict(conf):
+    info = conf.device_info
+    model = TV_HARDWARE_NAMES.get(info.raw_model) or TV_MODEL_NAMES.get(info.model) or "Apple TV"
+    legacy = info.model in (DeviceModel.AppleTVGen1, DeviceModel.Gen2, DeviceModel.Gen3) or info.raw_model in (
+        "AppleTV1,1", "AppleTV2,1", "AppleTV3,1", "AppleTV3,2",
+    )
+    os_name = "Apple TV Software" if legacy else "tvOS"
+    # pyatv can guess a major version from a build (e.g. '23.x'). Do not present
+    # that approximation as the actual installed software version.
+    version = info.version
+    exact_version = version if version and re.fullmatch(r"\d+(?:\.\d+){0,3}", version) else None
+    software = f"{os_name} {exact_version}" if exact_version else None
     return {
         "id": conf.identifier,
         "name": conf.name,
         "address": str(conf.address),
-        "model": conf.device_info.model_str or "Unknown model",
+        "model": model,
+        "software": software,
+        "build": info.build_number,
         "paired": is_paired(conf),
     }
 
 
-class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
+class TextEntryError(ValueError):
+    """A safe, user-facing text-entry error that never includes submitted text."""
+
+
+class Bridge(PushListener, DeviceListener, PowerListener, AudioListener, KeyboardListener):
     def __init__(self, loop, storage_path):
         self.loop = loop
         self.storage = FileStorage(storage_path, loop)
@@ -113,6 +157,7 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
         self.closing = False
         self.connection_commands = asyncio.Lock()
         self.connection_attempt = asyncio.Lock()
+        self.text_commands = asyncio.Lock()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -139,6 +184,14 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
                 raise ValueError(f"unknown command: {cmd}")
             await handler(msg)
         except Exception as ex:  # report everything to the UI
+            if cmd == "text":
+                # Protocol exceptions may contain the payload. Never log or echo it.
+                LOG.warning("text entry failed (%s)", type(ex).__name__)
+                message = str(ex) if isinstance(ex, TextEntryError) else (
+                    "Couldn't confirm text was sent. Check the TV before trying again."
+                )
+                emit("error", command=cmd, request=msg.get("request"), message=message)
+                return
             LOG.exception("command %s failed", cmd)
             emit("error", command=cmd, message=str(ex) or type(ex).__name__)
 
@@ -159,11 +212,9 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
         emit("scanning")
         found = await self.scan()
         suggested = [c for c in found if is_remote_candidate(c)]
-        others = [c for c in found if not is_remote_candidate(c)]
         emit(
             "devices",
             devices=[device_dict(c) for c in suggested],
-            other_devices=[device_dict(c) for c in others],
         )
 
     async def cmd_pair_begin(self, msg):
@@ -314,11 +365,13 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
         self.atv.push_updater.listener = self
         self.atv.power.listener = self
         self.atv.audio.listener = self
+        self.atv.keyboard.listener = self
         self.atv.push_updater.start()
         self.artwork_id = None
         emit("connected", device=device_dict(conf))
         self.powerstate_update(None, self.atv.power.power_state)
         self.emit_volume()
+        self.emit_keyboard()
         # Metadata is optional: a slow response must not strand an otherwise
         # usable remote, or prevent the polling task from being started.
         try:
@@ -382,6 +435,7 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
         if self.atv is None:
             return
         atv = self.atv
+        self.emit_keyboard()
         async with asyncio.timeout(REFRESH_TIMEOUT):
             playing = await atv.metadata.playing()
             if self.atv is atv:
@@ -453,6 +507,16 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
 
     # -- commands ----------------------------------------------------------
 
+    def emit_keyboard(self):
+        available, focused = False, False
+        if self.atv is not None:
+            try:
+                available = self.atv.features.in_state(FeatureState.Available, FeatureName.TextAppend)
+                focused = self.atv.keyboard.text_focus_state == KeyboardFocusState.Focused
+            except exceptions.NotSupportedError:
+                pass
+        emit("keyboard", available=available, focused=focused)
+
     def require_atv(self):
         if self.atv is None:
             raise exceptions.ConnectionFailedError("Not connected to an Apple TV")
@@ -473,6 +537,24 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
             await command(action=InputAction.Hold)
         else:
             await command()
+
+    async def cmd_text(self, msg):
+        async with self.text_commands:
+            atv = self.require_atv()
+            # Reject stale drafts after switching TVs, including a queued command.
+            if msg.get("device_id") != self.target_id:
+                raise TextEntryError("The selected Apple TV changed. Please try again.")
+            if not atv.features.in_state(FeatureState.Available, FeatureName.TextAppend):
+                raise TextEntryError("Text entry isn't available on this Apple TV.")
+            if atv.keyboard.text_focus_state != KeyboardFocusState.Focused:
+                raise TextEntryError("Open a text field on your Apple TV first.")
+            text = msg.get("text")
+            if not isinstance(text, str) or not text or len(text) > 4096:
+                raise TextEntryError("Enter between 1 and 4,096 characters.")
+            # Append, never replace, the TV's current text. Do not fetch its contents.
+            async with asyncio.timeout(8):
+                await atv.keyboard.text_append(text)
+            emit("text_sent", request=msg.get("request"))
 
     async def cmd_play_pause(self, msg):
         atv = self.require_atv()
@@ -543,6 +625,9 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
 
     def volume_update(self, old_level, new_level):
         emit("volume", level=new_level, available=True)
+
+    def focusstate_update(self, old_state, new_state):
+        self.emit_keyboard()
 
     def volume_device_update(self, output_device, old_level, new_level):
         pass
