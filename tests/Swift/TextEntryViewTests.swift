@@ -7,6 +7,14 @@ import SwiftUI
 enum TextEntryViewTests {
     static func settle() { RunLoop.main.run(until: Date().addingTimeInterval(0.15)) }
 
+    static func waitForEditor(in window: NSWindow) {
+        let deadline = Date().addingTimeInterval(3)
+        while !(window.firstResponder is NSTextView) && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        precondition(window.firstResponder is NSTextView, "Text editor did not receive keyboard focus")
+    }
+
     static func main() {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
@@ -24,16 +32,19 @@ enum TextEntryViewTests {
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = hosting
+        NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         settle()
         let compactHeight = hosting.fittingSize.height
         let navigationResponder = window.firstResponder
 
         func key(_ characters: String, code: UInt16) {
-            window.sendEvent(NSEvent.keyEvent(with: .keyDown, location: .zero,
-                modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
-                context: nil, characters: characters, charactersIgnoringModifiers: characters,
-                isARepeat: false, keyCode: code)!)
+            for type: NSEvent.EventType in [.keyDown, .keyUp] {
+                window.sendEvent(NSEvent.keyEvent(with: type, location: .zero,
+                    modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                    context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                    isARepeat: false, keyCode: code)!)
+            }
             settle()
         }
 
@@ -46,7 +57,7 @@ enum TextEntryViewTests {
         precondition(model.textDraft.isEmpty, "Navigation keys were redirected into the composer")
 
         model.focusTextEntry()
-        settle()
+        waitForEditor(in: window)
         key("h", code: 4)
         key(" ", code: 49)
         key("[", code: 33)
@@ -61,6 +72,7 @@ enum TextEntryViewTests {
         settle()
         precondition(model.textSent, "Successful send did not show confirmation")
         precondition(abs(hosting.fittingSize.height - composerHeight) < 1, "Receipt moved the panel")
+        waitForEditor(in: window)
         key("x", code: 7)
         precondition(model.textDraft == "x" && !model.textSent, "Receipt blocked continued typing")
         key("\r", code: 36)
@@ -70,6 +82,7 @@ enum TextEntryViewTests {
         precondition(!model.textSent, "Sent confirmation did not reset automatically")
         precondition(abs(hosting.fittingSize.height - composerHeight) < 1, "Reset moved the panel")
         precondition(model.needsTextEntry && model.textDraft.isEmpty, "Reset changed the active field or draft")
+        waitForEditor(in: window)
         key("x", code: 7)
         precondition(model.textDraft == "x", "Typing focus did not return after sending")
 
