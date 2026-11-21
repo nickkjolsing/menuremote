@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/nickkjolsing/menuremote/compare/v1.1.1...v1.1.2) (2026-11-21)
+
+
+### Bug Fixes
+
+* support holding the center button for context menus ([3f96825](https://github.com/nickkjolsing/menuremote/commit/3f968251ce76fe60ce7ba904bbb259f8a87796a6))
+
 ## [1.1.1](https://github.com/nickkjolsing/menuremote/compare/v1.1.0...v1.1.1) (2026-11-16)
 
 
