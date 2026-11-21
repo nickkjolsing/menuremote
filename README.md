@@ -47,6 +47,8 @@ On first launch, MenuRemote uses uv to download Python 3.13 and install pyatv 0.
 2. Enter the four-digit code shown on the TV. A second code may be requested.
 3. Click the remote icon to expand the direction pad. Use **⋯** to switch TVs or enable **Launch at Login**.
 
+Click the center button to select, or press and hold it to open the focused item's context menu in apps that support one.
+
 Use **⋯ → Check for Updates…** to look for a newer release and choose whether to install it. Updates preserve your pairing credentials. Automatic checks and installation are disabled.
 
 Keyboard controls work while the panel is open and focused:

@@ -40,8 +40,9 @@ struct DPadView: View {
                     .overlay(Circle().strokeBorder(.primary.opacity(0.15)))
                     .contentShape(Circle())
             }
-            .buttonStyle(PressableStyle())
-            .help("Select (Return)")
+            .buttonStyle(SelectButtonStyle { model.press("select", hold: true) })
+            .accessibilityLabel("Select")
+            .help("Select (Return); press and hold for the context menu")
         }
         .frame(width: 140, height: 140)
     }
@@ -56,6 +57,44 @@ struct DPadView: View {
         }
         .buttonStyle(PressableStyle())
         .help("\(key.capitalized) (arrow key)")
+    }
+}
+
+/// Resolve the hold before the tap so releasing a hold never sends a second Select.
+private struct SelectButtonStyle: PrimitiveButtonStyle {
+    var onHold: () -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        SelectButtonBody(configuration: configuration, onHold: onHold)
+    }
+
+    private struct SelectButtonBody: View {
+        let configuration: PrimitiveButtonStyleConfiguration
+        let onHold: () -> Void
+        @Environment(\.isEnabled) private var isEnabled
+        @GestureState private var isPressed = false
+
+        var body: some View {
+            configuration.label
+                .scaleEffect(isPressed ? 0.92 : 1)
+                .opacity(isPressed ? 0.7 : 1)
+                .animation(.easeOut(duration: 0.1), value: isPressed)
+                .gesture(
+                    LongPressGesture(minimumDuration: 0.5)
+                        .exclusively(before: TapGesture())
+                        .updating($isPressed) { _, pressed, _ in pressed = true }
+                        .onEnded { result in
+                            guard isEnabled else { return }
+                            switch result {
+                            case .first(true): onHold()
+                            case .second: configuration.trigger()
+                            default: break
+                            }
+                        }
+                )
+                .accessibilityAction { if isEnabled { configuration.trigger() } }
+                .accessibilityAction(named: "Press and Hold") { if isEnabled { onHold() } }
+        }
     }
 }
 

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, call, patch
 
-from pyatv.const import Protocol
+from pyatv.const import InputAction, Protocol
 from pyatv.core import CoreStateDispatcher
 from pyatv.core.facade import FacadeAppleTV
 from pyatv.protocols.companion import CompanionRemoteControl
@@ -70,6 +70,41 @@ class PlaybackTests(unittest.IsolatedAsyncioTestCase):
         self.mrp._send_command.assert_awaited_once_with(protobuf.CommandInfo_pb2.Pause)
         self.api.hid_command.assert_not_awaited()
         self.refresh.assert_awaited_once()
+
+    async def test_center_button_tap_and_hold_reach_mrp(self):
+        with patch("pyatv.protocols.mrp._send_hid_key", new=AsyncMock()) as send_key:
+            await self.bridge.cmd_key({"key": "select"})
+            await self.bridge.cmd_key({"key": "select", "hold": True})
+        self.assertEqual(send_key.await_args_list, [
+            call(self.mrp.protocol, "select", InputAction.SingleTap),
+            call(self.mrp.protocol, "select", InputAction.Hold),
+        ])
+
+    async def test_center_button_hold_sends_one_companion_press_and_release(self):
+        # Exercise pyatv's real hold implementation on a Companion-only device.
+        self.atv = FacadeAppleTV(device(), self.session, CoreStateDispatcher(), Settings())
+        self.bridge.atv = self.atv
+        self.atv.remote_control.register(self.companion, Protocol.Companion)
+        events = []
+        self.api.hid_command.side_effect = lambda down, key: events.append((down, key))
+
+        async def sleep(delay):
+            events.append(("wait", delay))
+
+        with patch("pyatv.protocols.companion.asyncio.sleep", side_effect=sleep):
+            await self.bridge.cmd_key({"key": "select", "hold": True})
+        self.assertEqual(events, [
+            (True, HidCommand.Select), ("wait", 1), (False, HidCommand.Select),
+        ])
+
+        events.clear()
+        await self.bridge.cmd_key({"key": "select", "hold": False})
+        self.assertEqual(events, [(True, HidCommand.Select), (False, HidCommand.Select)])
+
+    async def test_invalid_key_is_rejected_before_sending(self):
+        with self.assertRaisesRegex(ValueError, "unknown key"):
+            await self.bridge.cmd_key({"key": "invalid", "hold": True})
+        self.api.hid_command.assert_not_awaited()
 
 
 if __name__ == "__main__":

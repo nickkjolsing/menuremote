@@ -20,6 +20,7 @@ from pyatv.const import (
     DeviceState,
     FeatureName,
     FeatureState,
+    InputAction,
     PairingRequirement,
     PowerState,
     Protocol,
@@ -465,7 +466,13 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener):
         key = msg["key"]
         if key not in KEYS:
             raise ValueError(f"unknown key: {key}")
-        await getattr(self.require_atv().remote_control, key)()
+        command = getattr(self.require_atv().remote_control, key)
+        if msg.get("hold", False):
+            if key == "top_menu":
+                raise ValueError("top_menu does not support holding")
+            await command(action=InputAction.Hold)
+        else:
+            await command()
 
     async def cmd_play_pause(self, msg):
         atv = self.require_atv()

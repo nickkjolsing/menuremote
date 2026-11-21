@@ -403,8 +403,8 @@ final class RemoteModel: ObservableObject {
         bridge.send(["cmd": "volume", "level": level])
     }
 
-    func press(_ key: String) {
-        bridge.send(["cmd": "key", "key": key])
+    func press(_ key: String, hold: Bool = false) {
+        bridge.send(["cmd": "key", "key": key, "hold": hold])
     }
 
     func togglePower() {
