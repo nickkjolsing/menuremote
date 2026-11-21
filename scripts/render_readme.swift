@@ -69,8 +69,9 @@ struct ReadmeArtwork {
 
         color(0xf5f4f0).setFill()
         NSRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)).fill()
+        let showcase = NSRect(x: 680, y: 40, width: 480, height: 580)
         color(0xe8e5ed).setFill()
-        NSBezierPath(roundedRect: NSRect(x: 680, y: 40, width: 480, height: 580),
+        NSBezierPath(roundedRect: showcase,
                      xRadius: 24, yRadius: 24).fill()
 
         NSImage(contentsOfFile: "Support/AppIcon.icns")?
@@ -81,7 +82,11 @@ struct ReadmeArtwork {
         text("macOS 14+  /  Apple silicon", x: 91, y: 66,
              size: 16, weight: .medium, ink: color(0x68656e))
 
-        let panel = NSRect(x: 750, y: (660 - size.height) / 2 - 10,
+        let menuSize = NSSize(width: 30, height: 28)
+        let menuGap: CGFloat = 12
+        let groupHeight = size.height + menuGap + menuSize.height
+        let panel = NSRect(x: showcase.midX - size.width / 2,
+                           y: showcase.midY - groupHeight / 2,
                            width: size.width, height: size.height)
         let outline = NSBezierPath(roundedRect: panel, xRadius: 14, yRadius: 14)
         NSGraphicsContext.saveGraphicsState()
@@ -101,18 +106,20 @@ struct ReadmeArtwork {
         outline.lineWidth = 1
         outline.stroke()
 
-        let menuRect = NSRect(x: 1036, y: panel.maxY + 16, width: 54, height: 34)
+        let menuRect = NSRect(x: panel.midX - menuSize.width / 2,
+                              y: panel.maxY + menuGap, width: menuSize.width, height: menuSize.height)
         color(0xd6d1df).setFill()
-        NSBezierPath(roundedRect: menuRect, xRadius: 8, yRadius: 8).fill()
+        NSBezierPath(roundedRect: menuRect, xRadius: 6, yRadius: 6).fill()
+        // Match StatusItemController.setIcon, including the image's natural size.
         if let remote = NSImage(systemSymbolName: "appletvremote.gen4", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 16, weight: .medium)) {
-            let height: CGFloat = 20
-            let width = remote.size.width * height / remote.size.height
-            remote.draw(in: NSRect(x: menuRect.midX - width / 2, y: menuRect.midY - height / 2,
-                                   width: width, height: height))
+            remote.isTemplate = true
+            NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+                remote.draw(in: NSRect(x: menuRect.midX - remote.size.width / 2,
+                                       y: menuRect.midY - remote.size.height / 2,
+                                       width: remote.size.width, height: remote.size.height))
+            }
         }
-        text("Actual interface · Sample playback", x: 775, y: 72,
-             size: 14, weight: .regular, ink: color(0x68656e))
 
         NSGraphicsContext.restoreGraphicsState()
         let destination = URL(fileURLWithPath: "docs/images/menuremote.png")
