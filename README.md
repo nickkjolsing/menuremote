@@ -77,7 +77,7 @@ Volume, artwork, and seeking depend on the TV app and audio output.
 - **No TV found?** Check the local network connection and allow MenuRemote under **System Settings → Privacy & Security → Local Network**, if listed. Try scanning again.
 - **TV missing from the list?** Wake your Apple TV and scan again. The picker shows identified Apple TV hardware and filters out other receivers. New Apple TV model identifiers remain discoverable. Hardware generations, reported software versions, and IP addresses appear below each TV's name; hover for details and the software build.
 - **Setup failed?** Confirm uv is installed, then click **Retry**.
-- **Connection lost?** Use **⋯ → Reconnect**. Logs: `~/Library/Logs/MenuRemote.log`.
+- **Connection lost?** Use **⋯ → Reconnect**. Logs: `~/Library/Logs/MenuRemote.log`. Button presses include the key, tap/hold action, protocol, and whether sending completed.
 
 Pairing credentials and the Python environment stay in `~/Library/Application Support/MenuRemote/`. Keep `pyatv.conf` private.
 

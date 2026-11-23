@@ -61,8 +61,9 @@ struct DPadView: View {
     }
 }
 
-/// Resolve the hold before the tap so releasing a hold never sends a second Select.
-private struct SelectButtonStyle: PrimitiveButtonStyle {
+/// Track the mouse press directly: on macOS, an exclusive long-press/tap
+/// gesture can swallow a short click when the long press fails on mouse-up.
+struct SelectButtonStyle: PrimitiveButtonStyle {
     var onHold: () -> Void
 
     func makeBody(configuration: Configuration) -> some View {
@@ -75,6 +76,9 @@ private struct SelectButtonStyle: PrimitiveButtonStyle {
         @Environment(\.isEnabled) private var isEnabled
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @GestureState private var isPressed = false
+        @State private var holdTask: Task<Void, Never>?
+        @State private var didHold = false
+        @State private var pointerInside = false
 
         var body: some View {
             configuration.label
@@ -82,20 +86,47 @@ private struct SelectButtonStyle: PrimitiveButtonStyle {
                 .opacity(isPressed ? 0.9 : 1)
                 .animation(reduceMotion ? nil : .spring(response: 0.23, dampingFraction: 0.8), value: isPressed)
                 .gesture(
-                    LongPressGesture(minimumDuration: 0.5)
-                        .exclusively(before: TapGesture())
+                    DragGesture(minimumDistance: 0)
                         .updating($isPressed) { _, pressed, _ in pressed = true }
-                        .onEnded { result in
+                        .onChanged { value in
                             guard isEnabled else { return }
-                            switch result {
-                            case .first(true): onHold()
-                            case .second: configuration.trigger()
-                            default: break
+                            pointerInside = contains(value.location)
+                            if holdTask == nil {
+                                holdTask = Task { @MainActor in
+                                    do { try await Task.sleep(for: .milliseconds(500)) }
+                                    catch { return }
+                                    guard isEnabled && pointerInside else { return }
+                                    didHold = true
+                                    onHold()
+                                }
                             }
                         }
+                        .onEnded { value in
+                            let shouldTap = isEnabled && contains(value.location) && !didHold
+                            cancelPress()
+                            if shouldTap { configuration.trigger() }
+                        }
                 )
+                .onChange(of: isPressed) { _, pressed in
+                    if !pressed { cancelPress() }
+                }
+                .onChange(of: isEnabled) { _, enabled in
+                    if !enabled { cancelPress() }
+                }
+                .onDisappear { cancelPress() }
                 .accessibilityAction { if isEnabled { configuration.trigger() } }
                 .accessibilityAction(named: "Press and Hold") { if isEnabled { onHold() } }
+        }
+
+        private func contains(_ point: CGPoint) -> Bool {
+            hypot(point.x - 26, point.y - 26) <= 26
+        }
+
+        private func cancelPress() {
+            holdTask?.cancel()
+            holdTask = nil
+            didHold = false
+            pointerInside = false
         }
     }
 }

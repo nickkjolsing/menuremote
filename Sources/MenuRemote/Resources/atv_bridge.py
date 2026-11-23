@@ -158,6 +158,7 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener, Keyboar
         self.connection_commands = asyncio.Lock()
         self.connection_attempt = asyncio.Lock()
         self.text_commands = asyncio.Lock()
+        self.remote_commands = asyncio.Lock()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -530,13 +531,35 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener, Keyboar
         key = msg["key"]
         if key not in KEYS:
             raise ValueError(f"unknown key: {key}")
-        command = getattr(self.require_atv().remote_control, key)
         if msg.get("hold", False):
             if key == "top_menu":
                 raise ValueError("top_menu does not support holding")
-            await command(action=InputAction.Hold)
+            await self.remote_button(key, action=InputAction.Hold)
         else:
-            await command()
+            await self.remote_button(key)
+
+    async def remote_button(self, key, **kwargs):
+        # Commands arrive concurrently. Keep button events in order and prevent
+        # overlapping protocol takeovers, including a tap during a held Select.
+        async with self.remote_commands:
+            atv = self.require_atv()
+            # Send the same physical Select for center clicks and Return.
+            # The physical Play/Pause also handles variable-speed playback,
+            # which MRP's emulated toggle silently ignores in the Seeking state.
+            # Older TVs without Companion retain pyatv's normal protocol fallback.
+            release = atv.takeover(Protocol.Companion, RemoteControl) if key in (
+                "select", "play_pause"
+            ) else None
+            action = kwargs.get("action", InputAction.SingleTap).name
+            protocol = atv.remote_control.main_protocol
+            LOG.info("sending button=%s action=%s protocol=%s", key, action,
+                     protocol.name if protocol else "unknown")
+            try:
+                await getattr(atv.remote_control, key)(**kwargs)
+                LOG.info("sent button=%s action=%s", key, action)
+            finally:
+                if release:
+                    release()
 
     async def cmd_text(self, msg):
         async with self.text_commands:
@@ -557,15 +580,7 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener, Keyboar
             emit("text_sent", request=msg.get("request"))
 
     async def cmd_play_pause(self, msg):
-        atv = self.require_atv()
-        # MRP's emulated toggle silently ignores Seeking, which also represents
-        # normal playback at speeds such as 1.25x. Prefer the physical remote's
-        # Companion button; pyatv falls back to other protocols on older TVs.
-        release = atv.takeover(Protocol.Companion, RemoteControl)
-        try:
-            await atv.remote_control.play_pause()
-        finally:
-            release()
+        await self.remote_button("play_pause")
         await self.after_command()
 
     async def cmd_skip(self, msg):

@@ -71,7 +71,65 @@ class PlaybackTests(unittest.IsolatedAsyncioTestCase):
         self.api.hid_command.assert_not_awaited()
         self.refresh.assert_awaited_once()
 
-    async def test_center_button_tap_and_hold_reach_mrp(self):
+    async def test_scrub_then_select_uses_companion_center_button(self):
+        with (patch("pyatv.protocols.mrp._send_hid_key", new=AsyncMock()) as send_key,
+              self.assertLogs(bridge.LOG, level="INFO") as logs):
+            await self.bridge.cmd_key({"key": "right"})
+            await self.bridge.cmd_key({"key": "select"})
+        send_key.assert_awaited_once_with(self.mrp.protocol, "right", InputAction.SingleTap)
+        self.assertEqual(self.api.hid_command.await_args_list, [
+            call(True, HidCommand.Select), call(False, HidCommand.Select),
+        ])
+        self.mrp._send_command.assert_not_awaited()
+        self.assertEqual(self.atv.remote_control.main_protocol, Protocol.MRP)
+        self.assertIn("sending button=right action=SingleTap protocol=MRP", logs.output[0])
+        self.assertIn("sending button=select action=SingleTap protocol=Companion", logs.output[2])
+        self.assertIn("sent button=select action=SingleTap", logs.output[3])
+
+    async def test_select_failure_restores_routing_and_allows_next_button(self):
+        self.api.hid_command.side_effect = bridge.exceptions.ConnectionFailedError("lost")
+        with self.assertRaises(bridge.exceptions.ConnectionFailedError):
+            await self.bridge.cmd_key({"key": "select"})
+        self.assertEqual(self.atv.remote_control.main_protocol, Protocol.MRP)
+        with patch("pyatv.protocols.mrp._send_hid_key", new=AsyncMock()) as send_key:
+            await asyncio.wait_for(self.bridge.cmd_key({"key": "right"}), timeout=1)
+        send_key.assert_awaited_once_with(self.mrp.protocol, "right", InputAction.SingleTap)
+
+    async def test_overlapping_buttons_preserve_order_and_restore_routing(self):
+        pressed, finish = asyncio.Event(), asyncio.Event()
+
+        async def hid_command(down, key):
+            if down and key == HidCommand.Select:
+                pressed.set()
+                await finish.wait()
+
+        self.api.hid_command.side_effect = hid_command
+        with patch("pyatv.protocols.mrp._send_hid_key", new=AsyncMock()) as send_key:
+            select = asyncio.create_task(self.bridge.cmd_key({"key": "select"}))
+            self.addAsyncCleanup(self.cancel_task, select)
+            await asyncio.wait_for(pressed.wait(), timeout=1)
+            right = asyncio.create_task(self.bridge.cmd_key({"key": "right"}))
+            toggle = asyncio.create_task(self.bridge.cmd_play_pause({}))
+            await asyncio.sleep(0)
+            send_key.assert_not_awaited()
+            self.api.hid_command.assert_awaited_once_with(True, HidCommand.Select)
+            finish.set()
+            await asyncio.wait_for(asyncio.gather(select, right, toggle), timeout=1)
+        send_key.assert_awaited_once_with(self.mrp.protocol, "right", InputAction.SingleTap)
+        self.assertEqual(self.api.hid_command.await_args_list, [
+            call(True, HidCommand.Select), call(False, HidCommand.Select),
+            call(True, HidCommand.PlayPause), call(False, HidCommand.PlayPause),
+        ])
+        self.assertEqual(self.atv.remote_control.main_protocol, Protocol.MRP)
+
+    async def cancel_task(self, task):
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    async def test_center_button_tap_and_hold_fall_back_to_mrp(self):
+        self.atv = FacadeAppleTV(device(), self.session, CoreStateDispatcher(), Settings())
+        self.bridge.atv = self.atv
+        self.atv.remote_control.register(self.mrp, Protocol.MRP)
         with patch("pyatv.protocols.mrp._send_hid_key", new=AsyncMock()) as send_key:
             await self.bridge.cmd_key({"key": "select"})
             await self.bridge.cmd_key({"key": "select", "hold": True})
@@ -79,12 +137,10 @@ class PlaybackTests(unittest.IsolatedAsyncioTestCase):
             call(self.mrp.protocol, "select", InputAction.SingleTap),
             call(self.mrp.protocol, "select", InputAction.Hold),
         ])
+        self.api.hid_command.assert_not_awaited()
 
     async def test_center_button_hold_sends_one_companion_press_and_release(self):
-        # Exercise pyatv's real hold implementation on a Companion-only device.
-        self.atv = FacadeAppleTV(device(), self.session, CoreStateDispatcher(), Settings())
-        self.bridge.atv = self.atv
-        self.atv.remote_control.register(self.companion, Protocol.Companion)
+        # Exercise pyatv's real hold implementation when both protocols exist.
         events = []
         self.api.hid_command.side_effect = lambda down, key: events.append((down, key))
 
@@ -100,6 +156,15 @@ class PlaybackTests(unittest.IsolatedAsyncioTestCase):
         events.clear()
         await self.bridge.cmd_key({"key": "select", "hold": False})
         self.assertEqual(events, [(True, HidCommand.Select), (False, HidCommand.Select)])
+
+    async def test_companion_only_tv_can_select(self):
+        self.atv = FacadeAppleTV(device(), self.session, CoreStateDispatcher(), Settings())
+        self.bridge.atv = self.atv
+        self.atv.remote_control.register(self.companion, Protocol.Companion)
+        await self.bridge.cmd_key({"key": "select"})
+        self.assertEqual(self.api.hid_command.await_args_list, [
+            call(True, HidCommand.Select), call(False, HidCommand.Select),
+        ])
 
     async def test_invalid_key_is_rejected_before_sending(self):
         with self.assertRaisesRegex(ValueError, "unknown key"):

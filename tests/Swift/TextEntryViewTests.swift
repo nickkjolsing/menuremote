@@ -26,6 +26,7 @@ enum TextEntryViewTests {
     }
 
     static func runChecks() async {
+        await checkSelectButton()
         let suite = "MenuRemote.TextEntryTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -113,5 +114,60 @@ enum TextEntryViewTests {
             try! "passed\n".write(toFile: CommandLine.arguments[index + 1], atomically: true, encoding: .utf8)
         }
         print("Native text-entry checks passed: contextual visibility, focus, typing, send, dismissal")
+    }
+
+    static func checkSelectButton() async {
+        var taps = 0, holds = 0
+        let hosting = NSHostingView(rootView:
+            Button { taps += 1 } label: {
+                Circle().fill(.gray).frame(width: 52, height: 52).contentShape(Circle())
+            }
+            .buttonStyle(SelectButtonStyle { holds += 1 })
+            .frame(width: 100, height: 100)
+        )
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        await settle()
+
+        func mouse(_ type: NSEvent.EventType, at point: NSPoint = NSPoint(x: 50, y: 50)) {
+            window.sendEvent(NSEvent.mouseEvent(with: type, location: point,
+                modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)!)
+        }
+
+        mouse(.leftMouseDown)
+        try? await Task.sleep(for: .milliseconds(50))
+        mouse(.leftMouseUp)
+        await settle()
+        precondition(taps == 1 && holds == 0,
+                     "Center click did not send exactly one Select: taps=\(taps), holds=\(holds)")
+
+        mouse(.leftMouseDown)
+        try? await Task.sleep(for: .milliseconds(650))
+        mouse(.leftMouseUp)
+        await settle()
+        precondition(taps == 1 && holds == 1,
+                     "Center hold sent a tap or failed: taps=\(taps), holds=\(holds)")
+
+        mouse(.leftMouseDown)
+        try? await Task.sleep(for: .milliseconds(50))
+        mouse(.leftMouseUp)
+        await settle()
+        precondition(taps == 2 && holds == 1, "Center click stopped working after a hold")
+
+        mouse(.leftMouseDown)
+        try? await Task.sleep(for: .milliseconds(50))
+        mouse(.leftMouseDragged, at: NSPoint(x: 95, y: 95))
+        try? await Task.sleep(for: .milliseconds(650))
+        mouse(.leftMouseUp, at: NSPoint(x: 95, y: 95))
+        await settle()
+        precondition(taps == 2 && holds == 1, "Dragging outside the center sent a command")
+        window.close()
+        print("Native center-button checks passed: click, hold without extra tap, click after hold, drag cancellation")
     }
 }
