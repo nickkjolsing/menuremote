@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/nickkjolsing/menuremote/compare/v1.2.0...v1.2.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* restore center-button clicks while preserving holds ([67bfa21](https://github.com/nickkjolsing/menuremote/commit/67bfa2104d1d2ce90ce86458c487f2d4123a03b7))
+
 ## [1.2.0](https://github.com/nickkjolsing/menuremote/compare/v1.1.2...v1.2.0) (2026-11-21)
 
 
