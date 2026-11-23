@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/nickkjolsing/menuremote/compare/v1.2.1...v1.2.2) (2026-11-23)
+
+
+### Bug Fixes
+
+* keep the full remote icon visible in the menu bar ([aae8bb0](https://github.com/nickkjolsing/menuremote/commit/aae8bb09cd607b08f473067440688bcd5ee5d61d))
+
 ## [1.2.1](https://github.com/nickkjolsing/menuremote/compare/v1.2.0...v1.2.1) (2026-11-23)
 
 
