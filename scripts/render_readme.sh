@@ -16,6 +16,7 @@ swiftc -parse-as-library \
     Sources/MenuRemote/RemoteModel.swift \
     Sources/MenuRemote/DPadView.swift \
     Sources/MenuRemote/PlayerView.swift \
+    Sources/MenuRemote/StatusItemIcon.swift \
     scripts/render_readme.swift \
     -o "$PREVIEW_DIR/render-readme"
 "$PREVIEW_DIR/render-readme"

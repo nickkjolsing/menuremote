@@ -78,11 +78,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate {
     }
 
     private func setIcon() {
-        let image = NSImage(systemSymbolName: "appletvremote.gen4",
-                            accessibilityDescription: "MenuRemote")?
-            .withSymbolConfiguration(.init(pointSize: 16, weight: .medium))
-        image?.isTemplate = true
-        statusItem.button?.image = image
+        statusItem.button?.image = StatusItemIcon.make()
     }
 
     // MARK: - Showing and hiding

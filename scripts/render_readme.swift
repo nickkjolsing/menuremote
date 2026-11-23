@@ -110,10 +110,7 @@ struct ReadmeArtwork {
                               y: panel.maxY + menuGap, width: menuSize.width, height: menuSize.height)
         color(0xd6d1df).setFill()
         NSBezierPath(roundedRect: menuRect, xRadius: 6, yRadius: 6).fill()
-        // Match StatusItemController.setIcon, including the image's natural size.
-        if let remote = NSImage(systemSymbolName: "appletvremote.gen4", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 16, weight: .medium)) {
-            remote.isTemplate = true
+        if let remote = StatusItemIcon.make() {
             NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
                 remote.draw(in: NSRect(x: menuRect.midX - remote.size.width / 2,
                                        y: menuRect.midY - remote.size.height / 2,
