@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/nickkjolsing/menuremote/compare/v1.3.1...v1.4.0) (2026-11-25)
+
+
+### Features
+
+* add adaptive volume and setup app controls ([52f5c24](https://github.com/nickkjolsing/menuremote/commit/52f5c248cb13fe10925be5e7b4d0dc5f317072d7))
+
 ## [1.3.1](https://github.com/nickkjolsing/menuremote/compare/v1.3.0...v1.3.1) (2026-11-25)
 
 
