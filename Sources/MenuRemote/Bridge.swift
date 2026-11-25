@@ -1,73 +1,19 @@
 import Foundation
 
-/// Locations and one-time setup of the Python environment that runs pyatv.
+/// The private helper ships with Python and pyatv; only user data lives outside the app.
 enum PythonEnvironment {
-    static let pyatvVersion = "0.18.0"
-    static let pythonVersion = "3.13"
-
     static var supportDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MenuRemote", isDirectory: true)
     }
 
-    static var venv: URL { supportDirectory.appendingPathComponent("venv", isDirectory: true) }
-    static var python: URL { venv.appendingPathComponent("bin/python") }
+    static var helper: URL {
+        Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/MenuRemoteHelper.app/Contents/MacOS/MenuRemoteHelper")
+    }
     static var storageFile: URL { supportDirectory.appendingPathComponent("pyatv.conf") }
     static var logFile: URL {
         FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Logs/MenuRemote.log")
-    }
-
-    private static var marker: URL { venv.appendingPathComponent(".pyatv-\(pyatvVersion)") }
-
-    static var isReady: Bool {
-        FileManager.default.isExecutableFile(atPath: python.path)
-            && FileManager.default.fileExists(atPath: marker.path)
-    }
-
-    static var bridgeScript: URL? {
-        Bundle.main.url(forResource: "atv_bridge", withExtension: "py")
-    }
-
-    static func findUV() -> URL? {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = [
-            "/opt/homebrew/bin/uv", "/usr/local/bin/uv",
-            "\(home)/.local/bin/uv", "\(home)/.cargo/bin/uv",
-        ]
-        return candidates.lazy.map(URL.init(fileURLWithPath:))
-            .first { FileManager.default.isExecutableFile(atPath: $0.path) }
-    }
-
-    /// Creates the venv with uv and installs pyatv into it.
-    static func install() async throws {
-        guard let uv = findUV() else {
-            throw SetupError("uv was not found. Install it with `brew install uv` and retry.")
-        }
-        try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
-        try await run(uv, ["venv", "--clear", "--python", pythonVersion,
-                           "--python-preference", "only-managed", venv.path])
-        try await run(uv, ["pip", "install", "--python", python.path, "pyatv==\(pyatvVersion)"])
-        FileManager.default.createFile(atPath: marker.path, contents: nil)
-    }
-
-    private static func run(_ executable: URL, _ arguments: [String]) async throws {
-        try await Task.detached {
-            let process = Process()
-            process.executableURL = executable
-            process.arguments = arguments
-            let errPipe = Pipe()
-            process.standardError = errPipe
-            process.standardOutput = FileHandle.nullDevice
-            try process.run()
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else {
-                let message = String(decoding: errData, as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                throw SetupError(message.isEmpty ? "uv exited with \(process.terminationStatus)" : message)
-            }
-        }.value
     }
 
     struct SetupError: LocalizedError {
@@ -76,7 +22,7 @@ enum PythonEnvironment {
     }
 }
 
-/// Runs atv_bridge.py and exchanges newline-delimited JSON with it.
+/// Runs the bundled helper and exchanges newline-delimited JSON with it.
 final class BridgeProcess {
     typealias Event = [String: Any]
 
@@ -91,12 +37,17 @@ final class BridgeProcess {
     var isRunning: Bool { process?.isRunning ?? false }
 
     func start() throws {
-        guard let script = PythonEnvironment.bridgeScript else {
-            throw PythonEnvironment.SetupError("atv_bridge.py is missing from the app bundle.")
+        guard FileManager.default.isExecutableFile(atPath: PythonEnvironment.helper.path) else {
+            throw PythonEnvironment.SetupError("MenuRemote’s helper is missing or damaged. Download a fresh copy of the app.")
         }
+        try FileManager.default.createDirectory(at: PythonEnvironment.supportDirectory, withIntermediateDirectories: true)
         let process = Process()
-        process.executableURL = PythonEnvironment.python
-        process.arguments = ["-u", script.path, PythonEnvironment.storageFile.path]
+        process.executableURL = PythonEnvironment.helper
+        process.arguments = [PythonEnvironment.storageFile.path]
+        // A shell's Python configuration must not affect our private runtime.
+        process.environment = ProcessInfo.processInfo.environment.filter {
+            !$0.key.hasPrefix("PYTHON") && !$0.key.hasPrefix("_PYI") && $0.key != "LD_LIBRARY_PATH"
+        }
 
         let stdinPipe = Pipe(), stdoutPipe = Pipe()
         process.standardInput = stdinPipe

@@ -11,6 +11,7 @@ if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; th
 fi
 REVISION="$(git rev-parse HEAD)"
 
+bash scripts/build_helper.sh
 swift build --disable-keychain --disable-netrc -c release --arch arm64
 BIN="$(swift build --disable-keychain --disable-netrc -c release --arch arm64 --show-bin-path)/MenuRemote"
 SPARKLE_ROOT=".build/artifacts/sparkle/Sparkle"
@@ -23,7 +24,9 @@ if len(base64.b64decode(sys.argv[1], validate=True)) != 32:
 PY
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks" "$APP/Contents/Helpers"
+ditto build/helper/MenuRemoteHelper.app "$APP/Contents/Helpers/MenuRemoteHelper.app"
+ditto build/helper/ThirdPartyNotices "$APP/Contents/Resources/ThirdPartyNotices"
 ditto "$SPARKLE_FRAMEWORK" "$APP/Contents/Frameworks/Sparkle.framework"
 cp "$BIN" "$APP/Contents/MacOS/MenuRemote"
 cp Support/Info.plist "$APP/Contents/Info.plist"
@@ -36,7 +39,7 @@ cp Support/BitcoinMark.pdf "$APP/Contents/Resources/"
 cp Support/AboutLogoBackground.png "$APP/Contents/Resources/"
 cp LICENSE "$APP/Contents/Resources/LICENSE"
 cp "$SPARKLE_ROOT/LICENSE" "$APP/Contents/Resources/Sparkle.LICENSE"
-codesign --force --sign - "$APP"
+bash scripts/sign_app.sh "$APP"
 codesign --verify --deep --strict "$APP"
 
 echo "Built $APP"

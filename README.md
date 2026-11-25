@@ -18,16 +18,16 @@ A native macOS menu bar remote for Apple TV. See what's playing and control play
 
 ## Install
 
-**Requires:** Apple silicon, macOS 14+, and [uv](https://docs.astral.sh/uv/getting-started/installation/). Keep your Mac and Apple TV on the same local network.
+**Requires:** Apple silicon and macOS 14+. Keep your Mac and Apple TV on the same local network. Python and the Apple TV helper are included; Homebrew and uv are not required.
 
-Install uv (`brew install uv` with [Homebrew](https://brew.sh/)), then download the ZIP from [Releases](https://github.com/nickkjolsing/menuremote/releases/latest), unzip it, and move **MenuRemote.app** to `/Applications`.
+Download the ZIP from [Releases](https://github.com/nickkjolsing/menuremote/releases/latest), unzip it, and move **MenuRemote.app** to `/Applications`.
 
 Builds are ad-hoc signed, not notarized. macOS may block downloaded copies.
 
 <details>
 <summary>Build from source</summary>
 
-Requires [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/) in addition to uv.
+Building requires [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/) and [uv](https://docs.astral.sh/uv/getting-started/installation/). The build downloads a pinned Python and hash-locked dependencies, then packages the helper with PyInstaller. These tools are only needed on the build machine.
 
 ```sh
 xcode-select --install # Skip if already installed; finish before continuing.
@@ -40,7 +40,7 @@ cd menuremote
 
 </details>
 
-On first launch, MenuRemote uses uv to download Python 3.13 and install pyatv 0.18.0 in its own environment.
+On launch, MenuRemote starts its bundled Python 3.13 / pyatv 0.18.0 helper. There are no first-launch dependency downloads. Allow local network access if macOS asks, then select and pair your TV.
 
 ## Pair & play
 
@@ -76,10 +76,10 @@ Volume, artwork, and seeking depend on the TV app and audio output.
 
 - **No TV found?** Check the local network connection and allow MenuRemote under **System Settings → Privacy & Security → Local Network**, if listed. Try scanning again.
 - **TV missing from the list?** Wake your Apple TV and scan again. The picker shows identified Apple TV hardware and filters out other receivers. New Apple TV model identifiers remain discoverable. Hardware generations, reported software versions, and IP addresses appear below each TV's name; hover for details and the software build.
-- **Setup failed?** Confirm uv is installed, then click **Retry**.
+- **Helper missing or damaged?** Download and unzip a fresh copy of MenuRemote, then replace the app in `/Applications`. Pairing credentials are stored separately.
 - **Connection lost?** Use **⋯ → Reconnect**. Logs: `~/Library/Logs/MenuRemote.log`. Button presses include the key, tap/hold action, protocol, and whether sending completed.
 
-Pairing credentials and the Python environment stay in `~/Library/Application Support/MenuRemote/`. Keep `pyatv.conf` private.
+Pairing credentials stay in `~/Library/Application Support/MenuRemote/`. Keep `pyatv.conf` private. Updates preserve this file. Older versions' `venv` folders are no longer used; the bundled helper updates with the app.
 
 ## Contributing
 

@@ -1,0 +1,3 @@
+# Build-only tooling and the Apple TV helper. Resolved hashes live in .txt.
+pyatv==0.18.0
+pyinstaller==6.22.3

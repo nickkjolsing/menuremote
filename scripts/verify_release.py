@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import json
 from pathlib import Path
 import plistlib
 import re
@@ -38,6 +39,21 @@ def verify(archive, version, revision, require_appcast=False):
         for resource in ("atv_bridge.py", "AppIcon.icns", "AboutLogoBackground.png", "BitcoinMark.pdf", "LICENSE"):
             if not bundle.read(root + "Resources/" + resource):
                 raise ValueError(f"Empty app resource: {resource}")
+        helper_root = root + "Helpers/MenuRemoteHelper.app/Contents/"
+        helper = bundle.getinfo(helper_root + "MacOS/MenuRemoteHelper")
+        if not (helper.external_attr >> 16) & 0o111:
+            raise ValueError("Bundled helper lost its executable permissions")
+        if bundle.read(helper)[:8] != struct.pack("<II", 0xFEEDFACF, 0x0100000C):
+            raise ValueError("Bundled helper is not an Apple silicon Mach-O binary")
+        for resource in ("Frameworks/libpython3.13.dylib", "Resources/base_library.zip"):
+            if not bundle.read(helper_root + resource):
+                raise ValueError(f"Empty bundled runtime component: {resource}")
+        notices = root + "Resources/ThirdPartyNotices/"
+        versions = json.loads(bundle.read(notices + "versions.json"))
+        if not versions["python"].startswith("3.13.") or versions["packages"].get("pyatv") != "0.18.0":
+            raise ValueError("Bundled helper dependency versions do not match")
+        if not bundle.read(notices + "Python.LICENSE.txt"):
+            raise ValueError("Bundled Python license is empty")
         if info.get("SUFeedURL") != FEED_URL:
             raise ValueError("App update feed does not point to the production release feed")
         if len(base64.b64decode(info.get("SUPublicEDKey", ""), validate=True)) != 32:

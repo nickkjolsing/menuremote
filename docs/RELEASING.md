@@ -46,8 +46,8 @@ If `main` has moved ahead of an unfinished release, `gh workflow run build.yml -
 ## Local check
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r tests/requirements.txt
+uv venv --python "$(cat Support/helper-python-version.txt)" --managed-python .venv
+uv pip sync --python .venv/bin/python --require-hashes --only-binary :all: Support/helper-requirements.txt
 .venv/bin/python -m unittest discover -s tests -v
 bash scripts/test_remote_model.sh
 bash scripts/package_release.sh
@@ -55,10 +55,38 @@ bash scripts/test_text_entry.sh
 python3 scripts/test_updater.py
 ```
 
-Output: `dist/MenuRemote-X.Y.Z-macOS-arm64.zip`, its `.sha256` file, and signed `dist/appcast.xml` when a signing key is available. Packaging verifies the extracted app's signature and executable permissions, including Sparkle's helpers. Packaging without a private key is allowed for contribution builds, but cannot be published as a release.
+Output: `dist/MenuRemote-X.Y.Z-macOS-arm64.zip`, its `.sha256` file, and signed `dist/appcast.xml` when a signing key is available. Packaging verifies the extracted app's signature and executable permissions, including Sparkle's helpers. It runs a relocated copy of the Python helper with network, Homebrew, source checkout, and external Python access blocked. This exercises startup, native crypto, protocol imports, command exchange, and existing credential loading. Packaging without a private key is allowed for contribution builds, but cannot be published as a release.
+
+## Bundled helper
+
+No custom OS image or container is needed. `MenuRemote.app` is a directory containing the Swift executable, Sparkle, and `Contents/Helpers/MenuRemoteHelper.app/`. That nested bundle contains a PyInstaller executable, its private Python shared library, standard library, and Python dependencies. Its code and data use the macOS bundle layout for signing. Swift starts its executable directly and exchanges newline-delimited JSON over stdin/stdout, just as it previously did with the installed Python script.
+
+`scripts/build_helper.sh` runs only on the arm64 build machine. uv installs the exact Python patch from `Support/helper-python-version.txt` and verifies every package against the versions and hashes in `Support/helper-requirements.txt`. PyInstaller collects the helper into one directory and rewrites native library paths for relocation. It does not use a self-extracting executable. Python, Homebrew, uv, pip, and a compiler are not required on the user's Mac. Runtime files remain in the app bundle; credentials stay in Application Support. Old installed venvs are ignored and left intact.
+
+Dependency versions and license notices ship in `Contents/Resources/ThirdPartyNotices/`. Dependencies, including security fixes, update through app releases. To change them, edit `Support/helper-requirements.in` or the Python patch file, then regenerate and review the lock file on an arm64 Mac:
+
+```sh
+uv pip compile Support/helper-requirements.in \
+  --python "$(cat Support/helper-python-version.txt)" \
+  --python-platform aarch64-apple-darwin --generate-hashes \
+  --output-file Support/helper-requirements.txt
+```
+
+Run the local checks after changing the lock. If upgrading beyond Python 3.13 or pyatv 0.18.0, update the release verifier and helper smoke check as well.
 
 The updater integration tests compile disposable apps with separate bundle identifiers and temporary signing keys, serve them on loopback, and exercise installation with relaunch, an up-to-date app, a tampered archive, a tampered feed, and an unavailable feed. They do not launch or replace the installed MenuRemote, use the production private key, or contact Apple TVs.
 
 ## Apple signing
 
 Current downloads are **ad-hoc signed**, with no Apple Developer credentials required. They are not notarized, so Gatekeeper may block them. Developer ID signing and Apple notarization are needed for the normal download-and-open experience; the release workflow does not claim to provide either.
+
+Developer ID is optional at build time. After installing a Developer ID Application certificate and its private key in the build machine's keychain, use:
+
+```sh
+MENU_REMOTE_CODESIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' \
+  bash scripts/package_release.sh
+```
+
+PyInstaller signs the helper and its native libraries with that identity and hardened runtime. The app signing script re-signs Sparkle's nested components from the inside out, then signs the outer app with hardened runtime and a secure timestamp. With the variable unset, the build stays ad-hoc signed. Sparkle's Ed25519 update key is separate and remains required for publishing either kind of build.
+
+Developer ID signing alone does not notarize a release. Future notarization also requires submitting the signed app to Apple's notary service, stapling the accepted ticket before creating the final ZIP/checksum/appcast, and configuring certificate/notary credentials in CI. No Apple credentials or notarization submissions are used by the default workflow.

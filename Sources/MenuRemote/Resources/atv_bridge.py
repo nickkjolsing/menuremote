@@ -652,6 +652,29 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener, Keyboar
 
 
 def main():
+    if sys.argv[1:] == ["--self-test"]:
+        # Offline release check: exercise native crypto, models, and protocol imports.
+        from cryptography.hazmat.primitives.asymmetric import ed25519, x25519
+        from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+        from pyatv.protocols import PROTOCOLS
+        from pyatv.storage import StorageModel
+        from zeroconf import DNSOutgoing
+
+        payload = b"MenuRemote helper check"
+        key = ed25519.Ed25519PrivateKey.generate()
+        key.public_key().verify(key.sign(payload), payload)
+        alice, bob = x25519.X25519PrivateKey.generate(), x25519.X25519PrivateKey.generate()
+        if alice.exchange(bob.public_key()) != bob.exchange(alice.public_key()):
+            raise RuntimeError("Key exchange failed")
+        cipher = ChaCha20Poly1305(bytes(32))
+        nonce = bytes(12)
+        if cipher.decrypt(nonce, cipher.encrypt(nonce, payload, None), None) != payload:
+            raise RuntimeError("Encryption failed")
+        StorageModel.model_validate({"version": 1, "devices": []})
+        DNSOutgoing(0).packets()
+        emit("self_test", version=pyatv.const.__version__, python=sys.version.split()[0],
+             protocols=sorted(protocol.name for protocol in PROTOCOLS))
+        return
     logging.basicConfig(
         stream=sys.stderr,
         level=logging.DEBUG if os.environ.get("ATV_BRIDGE_DEBUG") else logging.INFO,

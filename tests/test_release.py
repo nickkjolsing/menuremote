@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 from pathlib import Path
 import plistlib
 import struct
@@ -13,7 +14,9 @@ from verify_release import FEED_URL, SPARKLE_NS, verify
 
 
 def make_package(archive, revision, version="1.0.0", executable=True, cpu=0x0100000C,
-                 automatic_updates=False, include_updater=True, omit_resource=None):
+                 automatic_updates=False, include_updater=True, omit_resource=None,
+                 include_helper=True, helper_executable=True, helper_cpu=0x0100000C,
+                 omit_runtime=None):
     root = "MenuRemote.app/Contents/"
     with ZipFile(archive, "w") as bundle:
         bundle.writestr(root + "Info.plist", plistlib.dumps({
@@ -35,6 +38,19 @@ def make_package(archive, revision, version="1.0.0", executable=True, cpu=0x0100
         for resource in ("atv_bridge.py", "AppIcon.icns", "AboutLogoBackground.png", "BitcoinMark.pdf", "LICENSE"):
             if resource != omit_resource:
                 bundle.writestr(root + "Resources/" + resource, b"sample")
+        if include_helper:
+            helper_root = root + "Helpers/MenuRemoteHelper.app/Contents/"
+            helper = ZipInfo(helper_root + "MacOS/MenuRemoteHelper")
+            helper.external_attr = (0o100755 if helper_executable else 0o100644) << 16
+            bundle.writestr(helper, struct.pack("<II", 0xFEEDFACF, helper_cpu))
+            for resource in ("Frameworks/libpython3.13.dylib", "Resources/base_library.zip"):
+                if resource != omit_runtime:
+                    bundle.writestr(helper_root + resource, b"sample")
+            notices = root + "Resources/ThirdPartyNotices/"
+            bundle.writestr(notices + "versions.json", json.dumps({
+                "python": "3.13.15", "packages": {"pyatv": "0.18.0"},
+            }))
+            bundle.writestr(notices + "Python.LICENSE.txt", b"sample")
         if include_updater:
             for name in ("Sparkle", "Autoupdate", "Updater.app/Contents/MacOS/Updater"):
                 component = ZipInfo(root + "Frameworks/Sparkle.framework/Versions/B/" + name)
@@ -124,6 +140,26 @@ class ReleaseIntegrityTests(unittest.TestCase):
         make_package(self.archive, self.revision, include_updater=False)
         with self.assertRaises(KeyError):
             verify(self.archive, "1.0.0", self.revision)
+
+    def test_missing_bundled_helper_is_rejected(self):
+        make_package(self.archive, self.revision, include_helper=False)
+        with self.assertRaises(KeyError):
+            verify(self.archive, "1.0.0", self.revision)
+
+    def test_helper_must_be_executable_and_arm64(self):
+        for kwargs, message in (({"helper_executable": False}, "permissions"),
+                                ({"helper_cpu": 0x01000007}, "Apple silicon")):
+            with self.subTest(kwargs=kwargs):
+                make_package(self.archive, self.revision, **kwargs)
+                with self.assertRaisesRegex(ValueError, message):
+                    verify(self.archive, "1.0.0", self.revision)
+
+    def test_incomplete_bundled_runtime_is_rejected(self):
+        for resource in ("Frameworks/libpython3.13.dylib", "Resources/base_library.zip"):
+            with self.subTest(resource=resource):
+                make_package(self.archive, self.revision, omit_runtime=resource)
+                with self.assertRaises(KeyError):
+                    verify(self.archive, "1.0.0", self.revision)
 
 
 if __name__ == "__main__":

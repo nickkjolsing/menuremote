@@ -1,1 +1,2 @@
-pyatv==0.18.0
+# Test against the same resolved dependencies as the shipped helper.
+-r ../Support/helper-requirements.txt

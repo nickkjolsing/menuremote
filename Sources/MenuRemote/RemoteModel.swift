@@ -156,15 +156,6 @@ final class RemoteModel: ObservableObject {
     // MARK: - Bridge lifecycle
 
     func start() async {
-        if !PythonEnvironment.isReady {
-            phase = .settingUp("Installing pyatv (first launch only)…")
-            do {
-                try await PythonEnvironment.install()
-            } catch {
-                phase = .setupFailed(error.localizedDescription)
-                return
-            }
-        }
         do {
             phase = .settingUp("Starting…")
             try bridge.start()
