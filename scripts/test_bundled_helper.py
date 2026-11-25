@@ -64,6 +64,8 @@ def exercise(app):
         if (event["event"], event["version"], event["python"], event["protocols"]) != (
                 "self_test", "0.18.0", expected_python, ["AirPlay", "Companion", "DMAP", "MRP", "RAOP"]):
             raise AssertionError(event)
+        if event.get("pairing") != ["HAP", "Legacy"]:
+            raise AssertionError("Helper did not exercise pairing initialization")
         # Existing credentials stay byte-for-byte intact; the legacy venv is absent.
         storage = work / "pyatv.conf"
         original = json.dumps({"version": 1, "devices": [{"protocols": {
@@ -90,7 +92,7 @@ def exercise(app):
             if process.poll() is None:
                 process.kill()
                 process.communicate()
-        print("PASS relocated helper: offline startup, crypto, protocols, stdio, and existing credentials")
+        print("PASS relocated helper: offline startup, crypto, pairing, protocols, stdio, and existing credentials")
 
 
 if __name__ == "__main__":

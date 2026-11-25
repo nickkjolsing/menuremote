@@ -675,7 +675,9 @@ def main():
         # Offline release check: exercise native crypto, models, and protocol imports.
         from cryptography.hazmat.primitives.asymmetric import ed25519, x25519
         from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+        from pyatv.auth.hap_srp import SRPAuthHandler
         from pyatv.protocols import PROTOCOLS
+        from pyatv.protocols.airplay.srp import LegacySRPAuthHandler, new_credentials
         from pyatv.storage import StorageModel
         from zeroconf import DNSOutgoing
 
@@ -691,8 +693,15 @@ def main():
             raise RuntimeError("Encryption failed")
         StorageModel.model_validate({"version": 1, "devices": []})
         DNSOutgoing(0).packets()
+        # Imports alone missed a dependency API break that prevented new pairing.
+        hap = SRPAuthHandler()
+        hap.initialize()
+        hap.step1("1234")
+        legacy = LegacySRPAuthHandler(new_credentials())
+        legacy.initialize()
+        legacy.step1("MenuRemote", "1234")
         emit("self_test", version=pyatv.const.__version__, python=sys.version.split()[0],
-             protocols=sorted(protocol.name for protocol in PROTOCOLS))
+             protocols=sorted(protocol.name for protocol in PROTOCOLS), pairing=["HAP", "Legacy"])
         return
     logging.basicConfig(
         stream=sys.stderr,

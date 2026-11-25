@@ -63,6 +63,8 @@ No custom OS image or container is needed. `MenuRemote.app` is a directory conta
 
 `scripts/build_helper.sh` runs only on the arm64 build machine. uv installs the exact Python patch from `Support/helper-python-version.txt` and verifies every package against the versions and hashes in `Support/helper-requirements.txt`. PyInstaller collects the helper into one directory and rewrites native library paths for relocation. It does not use a self-extracting executable. Python, Homebrew, uv, pip, and a compiler are not required on the user's Mac. Runtime files remain in the app bundle; credentials stay in Application Support. Old installed venvs are ignored and left intact.
 
+Keep `srptools==1.0.1` while using pyatv 0.18.0. The srptools 2 API breaks new pairing ([upstream issue](https://github.com/postlund/pyatv/issues/2940)); imports and previously saved credentials do not exercise this path. Source tests perform real HAP and legacy SRP handshakes against an in-process server. The packaged helper's offline self-test also initializes both pairing paths before a release can pass verification.
+
 Dependency versions and license notices ship in `Contents/Resources/ThirdPartyNotices/`. Dependencies, including security fixes, update through app releases. To change them, edit `Support/helper-requirements.in` or the Python patch file, then regenerate and review the lock file on an arm64 Mac:
 
 ```sh

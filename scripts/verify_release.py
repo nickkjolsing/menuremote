@@ -50,7 +50,8 @@ def verify(archive, version, revision, require_appcast=False):
                 raise ValueError(f"Empty bundled runtime component: {resource}")
         notices = root + "Resources/ThirdPartyNotices/"
         versions = json.loads(bundle.read(notices + "versions.json"))
-        if not versions["python"].startswith("3.13.") or versions["packages"].get("pyatv") != "0.18.0":
+        if (not versions["python"].startswith("3.13.") or versions["packages"].get("pyatv") != "0.18.0"
+                or versions["packages"].get("srptools") != "1.0.1"):
             raise ValueError("Bundled helper dependency versions do not match")
         if not bundle.read(notices + "Python.LICENSE.txt"):
             raise ValueError("Bundled Python license is empty")

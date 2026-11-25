@@ -16,7 +16,7 @@ from verify_release import FEED_URL, SPARKLE_NS, verify
 def make_package(archive, revision, version="1.0.0", executable=True, cpu=0x0100000C,
                  automatic_updates=False, include_updater=True, omit_resource=None,
                  include_helper=True, helper_executable=True, helper_cpu=0x0100000C,
-                 omit_runtime=None):
+                 omit_runtime=None, srptools_version="1.0.1"):
     root = "MenuRemote.app/Contents/"
     with ZipFile(archive, "w") as bundle:
         bundle.writestr(root + "Info.plist", plistlib.dumps({
@@ -48,7 +48,7 @@ def make_package(archive, revision, version="1.0.0", executable=True, cpu=0x0100
                     bundle.writestr(helper_root + resource, b"sample")
             notices = root + "Resources/ThirdPartyNotices/"
             bundle.writestr(notices + "versions.json", json.dumps({
-                "python": "3.13.15", "packages": {"pyatv": "0.18.0"},
+                "python": "3.13.15", "packages": {"pyatv": "0.18.0", "srptools": srptools_version},
             }))
             bundle.writestr(notices + "Python.LICENSE.txt", b"sample")
         if include_updater:
@@ -160,6 +160,11 @@ class ReleaseIntegrityTests(unittest.TestCase):
                 make_package(self.archive, self.revision, omit_runtime=resource)
                 with self.assertRaises(KeyError):
                     verify(self.archive, "1.0.0", self.revision)
+
+    def test_incompatible_srp_dependency_is_rejected(self):
+        make_package(self.archive, self.revision, srptools_version="2.0.0")
+        with self.assertRaisesRegex(ValueError, "dependency versions"):
+            verify(self.archive, "1.0.0", self.revision)
 
 
 if __name__ == "__main__":
