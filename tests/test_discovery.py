@@ -105,6 +105,86 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.temp.cleanup)
         self.bridge = bridge.Bridge(
             asyncio.get_running_loop(), str(Path(self.temp.name) / "pyatv.conf"))
+        delays = patch.object(bridge, "INITIAL_SCAN_DELAYS", (0, 0, 0))
+        delays.start()
+        self.addCleanup(delays.stop)
+
+    async def test_initial_scan_recovers_from_failure_without_a_manual_retry(self):
+        tv = device()
+        with patch.object(self.bridge, "scan", new=AsyncMock(side_effect=[OSError("Network unavailable"), [tv]])) as scan:
+            with patch.object(bridge, "emit") as emit, self.assertLogs("atv_bridge", level="WARNING"):
+                await self.bridge.handle({"cmd": "scan"})
+        self.assertEqual(scan.await_count, 2)
+        self.assertEqual([call.args[0] for call in emit.call_args_list], ["scanning", "devices"])
+        emit.assert_any_call("devices", devices=[bridge.device_dict(tv)])
+
+    async def test_initial_empty_scan_retries_before_showing_no_devices(self):
+        tv = device()
+        speaker = device("speaker", model=DeviceModel.HomePodMini, raw_model="AudioAccessory5,1")
+        with patch.object(self.bridge, "scan", new=AsyncMock(side_effect=[[], [speaker], [tv]])) as scan:
+            with patch.object(bridge, "emit") as emit:
+                await self.bridge.cmd_scan({})
+        self.assertEqual(scan.await_count, 3)
+        self.assertEqual([call.args[0] for call in emit.call_args_list], ["scanning", "devices"])
+        emit.assert_any_call("devices", devices=[bridge.device_dict(tv)])
+
+    async def test_initial_retries_end_with_an_error_and_manual_retry_still_works(self):
+        scan = AsyncMock(side_effect=OSError("Network unavailable"))
+        with patch.object(self.bridge, "scan", new=scan), patch.object(bridge, "emit") as emit:
+            with self.assertLogs("atv_bridge", level="WARNING"):
+                await self.bridge.handle({"cmd": "scan"})
+            self.assertEqual(scan.await_count, 3)
+            emit.assert_called_with("error", command="scan", message="Network unavailable")
+            # An explicit retry after the initial budget must still send a scan.
+            scan.side_effect = None
+            scan.return_value = [device()]
+            await self.bridge.cmd_scan({})
+            self.assertEqual(scan.await_count, 4)
+            emit.assert_called_with("devices", devices=[bridge.device_dict(device())])
+
+    async def test_empty_initial_search_stops_and_later_searches_do_not_retry(self):
+        with patch.object(self.bridge, "scan", new=AsyncMock(return_value=[])) as scan:
+            with patch.object(bridge, "emit") as emit:
+                await self.bridge.cmd_scan({})
+                self.assertEqual(scan.await_count, 3)
+                emit.assert_called_with("devices", devices=[])
+                await self.bridge.cmd_scan({})
+                self.assertEqual(scan.await_count, 4)
+
+    async def test_successful_first_search_does_not_retry(self):
+        with patch.object(self.bridge, "scan", new=AsyncMock(return_value=[device()])) as scan:
+            with patch.object(bridge, "emit"):
+                await self.bridge.cmd_scan({})
+        scan.assert_awaited_once()
+
+    async def test_overlapping_search_requests_share_the_active_search(self):
+        started, finish = asyncio.Event(), asyncio.Event()
+
+        async def slow_scan():
+            started.set()
+            await finish.wait()
+            return [device()]
+
+        with patch.object(self.bridge, "scan", new=AsyncMock(side_effect=slow_scan)) as scan:
+            with patch.object(bridge, "emit") as emit:
+                pending = asyncio.create_task(self.bridge.cmd_scan({}))
+                try:
+                    await asyncio.wait_for(started.wait(), 1)
+                    await self.bridge.cmd_scan({})
+                finally:
+                    finish.set()
+                    await asyncio.wait_for(pending, 1)
+        scan.assert_awaited_once()
+        self.assertEqual([call.args[0] for call in emit.call_args_list], ["scanning", "devices"])
+
+    async def test_cancellation_is_not_retried(self):
+        with patch.object(self.bridge, "scan", new=AsyncMock(side_effect=asyncio.CancelledError)) as scan:
+            with patch.object(bridge, "emit") as emit:
+                with self.assertRaises(asyncio.CancelledError):
+                    await self.bridge.cmd_scan({})
+        scan.assert_awaited_once()
+        self.assertFalse(self.bridge.discovery_lock.locked())
+        self.assertEqual([call.args[0] for call in emit.call_args_list], ["scanning"])
 
     async def test_picker_finds_replacement_despite_cached_tv_with_same_name(self):
         old = device("old-tv", model=DeviceModel.Gen4K, raw_model="AppleTV6,2")

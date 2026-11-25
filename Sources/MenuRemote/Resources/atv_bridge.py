@@ -40,6 +40,9 @@ POLL_INTERVAL = 5
 CONNECT_TIMEOUT = 30
 REFRESH_TIMEOUT = 10
 CLOSE_TIMEOUT = 5
+# The first search can race macOS's Local Network prompt or interface startup.
+# Keep it bounded; subsequent explicit searches remain a single attempt.
+INITIAL_SCAN_DELAYS = (0, 1, 2)
 
 KEYS = {"up", "down", "left", "right", "select", "menu", "home", "top_menu"}
 FEATURES = {
@@ -159,6 +162,8 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener, Keyboar
         self.connection_attempt = asyncio.Lock()
         self.text_commands = asyncio.Lock()
         self.remote_commands = asyncio.Lock()
+        self.discovery_lock = asyncio.Lock()
+        self.initial_discovery = True
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -210,13 +215,27 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener, Keyboar
         return found
 
     async def cmd_scan(self, msg):
-        emit("scanning")
-        found = await self.scan()
-        suggested = [c for c in found if is_remote_candidate(c)]
-        emit(
-            "devices",
-            devices=[device_dict(c) for c in suggested],
-        )
+        # Coalesce duplicate requests while a search (including retries) is active.
+        if self.discovery_lock.locked():
+            return
+        async with self.discovery_lock:
+            delays = INITIAL_SCAN_DELAYS if self.initial_discovery else (0,)
+            self.initial_discovery = False
+            emit("scanning")
+            for attempt, delay in enumerate(delays):
+                if delay:
+                    await asyncio.sleep(delay)
+                try:
+                    found = await self.scan()
+                except Exception:
+                    if attempt == len(delays) - 1:
+                        raise
+                    LOG.warning("Initial discovery failed; retrying", exc_info=True)
+                    continue
+                suggested = [c for c in found if is_remote_candidate(c)]
+                if suggested or attempt == len(delays) - 1:
+                    emit("devices", devices=[device_dict(c) for c in suggested])
+                    return
 
     async def cmd_pair_begin(self, msg):
         await self.cmd_pair_cancel(msg)

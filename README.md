@@ -42,6 +42,8 @@ cd menuremote
 
 On launch, MenuRemote starts its bundled Python 3.13 / pyatv 0.18.0 helper. There are no first-launch dependency downloads. Allow local network access if macOS asks, then select and pair your TV.
 
+The first TV search makes up to three attempts after temporary failures or empty results, giving local network access time to become available. If no TV appears, check the network and permission settings, then click the scan button to try again.
+
 ## Pair & play
 
 1. Click the remote icon in your menu bar and select your TV.

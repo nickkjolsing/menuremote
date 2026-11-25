@@ -40,7 +40,7 @@ struct DevicePickerView: View {
                         .font(.system(size: 26)).foregroundStyle(.tertiary)
                     Text(model.scanning ? "Looking for Apple TVs…" : "No Apple TVs found")
                         .font(.callout.weight(.medium))
-                    Text(model.scanning ? "Searching your local network" : "Keep your Apple TV on the same network and allow Local Network access in System Settings.")
+                    Text(model.scanning ? "Searching your local network. Allow Local Network access if macOS asks." : "Keep your Apple TV on the same network and allow Local Network access in System Settings.")
                         .font(.caption).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
