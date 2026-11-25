@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1](https://github.com/nickkjolsing/menuremote/compare/v1.3.0...v1.3.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* restore new-device pairing with compatible SRP dependencies ([50e77dd](https://github.com/nickkjolsing/menuremote/commit/50e77dd4fdf6e9c1c7eb4bf6f9a74d6b69fc9520))
+* retry the initial Apple TV search automatically ([2f9a60e](https://github.com/nickkjolsing/menuremote/commit/2f9a60ee3fd8be7875f001d02f0a408f34f2cd84))
+
 ## [1.3.0](https://github.com/nickkjolsing/menuremote/compare/v1.2.2...v1.3.0) (2026-11-25)
 
 
