@@ -9,6 +9,7 @@ import asyncio
 import base64
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -455,6 +456,7 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener, Keyboar
         if self.atv is None:
             return
         atv = self.atv
+        self.emit_volume()
         self.emit_keyboard()
         async with asyncio.timeout(REFRESH_TIMEOUT):
             playing = await atv.metadata.playing()
@@ -517,13 +519,43 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener, Keyboar
         else:
             emit("artwork", data=None)
 
+    def volume_state(self):
+        atv = self.atv
+
+        def available(feature):
+            try:
+                if atv is None:
+                    return False
+                features = atv.features
+                if feature in (FeatureName.VolumeUp, FeatureName.VolumeDown):
+                    # Match the protocol used for physical volume buttons. The
+                    # default MRP feature map can hide Companion's step controls
+                    # when HDMI does not expose an absolute audio level.
+                    features = features.get(Protocol.Companion) or features
+                return features.in_state(FeatureState.Available, feature)
+            except Exception:
+                return False
+
+        level = None
+        if available(FeatureName.Volume):
+            try:
+                reported = atv.audio.volume
+                if (isinstance(reported, (int, float)) and not isinstance(reported, bool)
+                        and math.isfinite(reported) and 0 <= reported <= 100):
+                    level = reported
+            except Exception:
+                pass
+        # A slider requires both a readable level and absolute-volume control.
+        # Button support is independent and does not prove that HDMI-CEC is working.
+        return {
+            "level": level,
+            "available": available(FeatureName.SetVolume) and level is not None,
+            "up_available": available(FeatureName.VolumeUp),
+            "down_available": available(FeatureName.VolumeDown),
+        }
+
     def emit_volume(self):
-        try:
-            available = self.atv.features.in_state(FeatureState.Available, FeatureName.SetVolume)
-            level = self.atv.audio.volume if available else None
-        except Exception:
-            available, level = False, None
-        emit("volume", level=level, available=available)
+        emit("volume", device_id=self.target_id, **self.volume_state())
 
     # -- commands ----------------------------------------------------------
 
@@ -557,17 +589,23 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener, Keyboar
         else:
             await self.remote_button(key)
 
-    async def remote_button(self, key, **kwargs):
+    async def remote_button(self, key, *, device_id=None, **kwargs):
         # Commands arrive concurrently. Keep button events in order and prevent
         # overlapping protocol takeovers, including a tap during a held Select.
         async with self.remote_commands:
             atv = self.require_atv()
+            if key in ("volume_up", "volume_down"):
+                if device_id != self.target_id:
+                    raise exceptions.ConnectionFailedError("The selected Apple TV changed. Please try again.")
+                capability = "up_available" if key == "volume_up" else "down_available"
+                if not self.volume_state()[capability]:
+                    raise exceptions.NotSupportedError("Volume control isn't available on this Apple TV.")
             # Send the same physical Select for center clicks and Return.
             # The physical Play/Pause also handles variable-speed playback,
             # which MRP's emulated toggle silently ignores in the Seeking state.
             # Older TVs without Companion retain pyatv's normal protocol fallback.
             release = atv.takeover(Protocol.Companion, RemoteControl) if key in (
-                "select", "play_pause"
+                "select", "play_pause", "volume_up", "volume_down"
             ) else None
             action = kwargs.get("action", InputAction.SingleTap).name
             protocol = atv.remote_control.main_protocol
@@ -619,7 +657,26 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener, Keyboar
         await self.after_command()
 
     async def cmd_volume(self, msg):
-        await self.require_atv().audio.set_volume(float(msg["level"]))
+        atv = self.require_atv()
+        if msg.get("device_id") != self.target_id:
+            raise exceptions.ConnectionFailedError("The selected Apple TV changed. Please try again.")
+        level = msg.get("level")
+        if (not isinstance(level, (int, float)) or isinstance(level, bool)
+                or not math.isfinite(level) or not 0 <= level <= 100):
+            raise ValueError("Volume must be between 0 and 100.")
+        if not self.volume_state()["available"]:
+            raise exceptions.NotSupportedError("Setting an exact volume isn't available on this Apple TV.")
+        await atv.audio.set_volume(float(level))
+
+    async def cmd_volume_step(self, msg):
+        direction = msg.get("direction")
+        if direction not in ("up", "down"):
+            raise ValueError("Volume direction must be up or down.")
+        # Send physical buttons through Companion when configured. Its Audio API
+        # waits for a level update that CEC receivers may never report. Never send
+        # a second command just because feedback is absent.
+        await self.remote_button(f"volume_{direction}", device_id=msg.get("device_id"))
+        self.emit_volume()
 
     async def cmd_power(self, msg):
         if self.atv is None and msg["on"] and self.target_id:
@@ -658,16 +715,16 @@ class Bridge(PushListener, DeviceListener, PowerListener, AudioListener, Keyboar
         emit("power", on=new_state == PowerState.On, known=new_state != PowerState.Unknown)
 
     def volume_update(self, old_level, new_level):
-        emit("volume", level=new_level, available=True)
+        self.emit_volume()
 
     def focusstate_update(self, old_state, new_state):
         self.emit_keyboard()
 
     def volume_device_update(self, output_device, old_level, new_level):
-        pass
+        self.emit_volume()
 
     def outputdevices_update(self, old_devices, new_devices):
-        pass
+        self.emit_volume()
 
 
 def main():

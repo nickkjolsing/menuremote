@@ -42,6 +42,8 @@ cd menuremote
 
 On launch, MenuRemote starts its bundled Python 3.13 / pyatv 0.18.0 helper. There are no first-launch dependency downloads. Allow local network access if macOS asks, then select and pair your TV.
 
+Without a saved TV, the panel opens automatically. **Check for Updates…** and **Quit** are visible at the bottom during startup, TV discovery, pairing, and connection errors—even if setup fails. Updating does not require a TV connection. Once connected, both actions are also in the **⋯** menu. Open MenuRemote again from Finder to bring its panel back.
+
 The first TV search makes up to three attempts after temporary failures or empty results, giving local network access time to become available. If no TV appears, check the network and permission settings, then click the scan button to try again.
 
 ## Pair & play
@@ -72,7 +74,9 @@ Keyboard controls work while the panel is open and focused:
 | `[` / `]` | Skip back / forward 10 seconds |
 | Escape | Close panel |
 
-Volume, artwork, and seeking depend on the TV app and audio output.
+Volume controls adapt to the capabilities available through Apple TV: a slider when it reports a readable level and supports setting it, − / + buttons when only volume steps are available, or an unavailable indicator otherwise. Controls refresh when the output changes. The app does not adjust the volume to test support or invent a percentage for receivers without level feedback. Button support does not confirm a working CEC connection; compatible HDMI receivers still need HDMI volume control enabled on Apple TV and the receiver.
+
+Artwork and seeking depend on the TV app and audio output.
 
 ## Troubleshooting
 

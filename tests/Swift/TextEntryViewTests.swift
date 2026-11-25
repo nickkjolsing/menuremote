@@ -27,6 +27,8 @@ enum TextEntryViewTests {
 
     static func runChecks() async {
         await checkSelectButton()
+        await checkVolumeButtons()
+        await checkAppActions()
         let suite = "MenuRemote.TextEntryTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -114,6 +116,83 @@ enum TextEntryViewTests {
             try! "passed\n".write(toFile: CommandLine.arguments[index + 1], atomically: true, encoding: .utf8)
         }
         print("Native text-entry checks passed: contextual visibility, focus, typing, send, dismissal")
+    }
+
+    static func checkAppActions() async {
+        var updates = 0, quits = 0
+        // No model, helper, paired device, updater network request, or actual quit.
+        let hosting = NSHostingView(rootView: AppActionsBar(
+            canCheckForUpdates: true, checkForUpdates: { updates += 1 }, quit: { quits += 1 }
+        ).frame(width: 340, height: 50))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 340, height: 50),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        await settle()
+
+        func click(x: CGFloat) async {
+            for type: NSEvent.EventType in [.leftMouseDown, .leftMouseUp] {
+                window.sendEvent(NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: 25),
+                    modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                    clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!)
+            }
+            await settle()
+        }
+
+        await click(x: 90)
+        await click(x: 310)
+        precondition(updates == 1 && quits == 1, "App actions required a TV connection")
+        hosting.rootView = AppActionsBar(
+            canCheckForUpdates: false, checkForUpdates: { updates += 1 }, quit: { quits += 1 }
+        ).frame(width: 340, height: 50)
+        await settle()
+        await click(x: 90)
+        await click(x: 310)
+        precondition(updates == 1 && quits == 2, "Updater readiness disabled Quit or allowed an unavailable check")
+        window.close()
+        print("Native app actions passed: update and quit without a TV; quit while updater is unavailable")
+    }
+
+    static func checkVolumeButtons() async {
+        var decreases = 0, increases = 0
+        let hosting = NSHostingView(rootView: VolumeStepButtons(
+            canDecrease: true, canIncrease: true,
+            decrease: { decreases += 1 }, increase: { increases += 1 }
+        ).frame(width: 300, height: 50))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 50),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        await settle()
+
+        func click(x: CGFloat) async {
+            for type: NSEvent.EventType in [.leftMouseDown, .leftMouseUp] {
+                window.sendEvent(NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: 25),
+                    modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                    clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!)
+            }
+            await settle()
+        }
+
+        await click(x: 15)
+        await click(x: 285)
+        precondition(decreases == 1 && increases == 1, "Volume buttons did not send separate up/down actions")
+        hosting.rootView = VolumeStepButtons(
+            canDecrease: false, canIncrease: true,
+            decrease: { decreases += 1 }, increase: { increases += 1 }
+        ).frame(width: 300, height: 50)
+        await settle()
+        await click(x: 15)
+        await click(x: 285)
+        precondition(decreases == 1 && increases == 2, "An unavailable direction sent a volume action")
+        window.close()
+        print("Native volume checks passed: up/down actions and unavailable direction")
     }
 
     static func checkSelectButton() async {

@@ -15,6 +15,8 @@ swiftc -parse-as-library \
     Sources/MenuRemote/AboutWindow.swift \
     Sources/MenuRemote/Bridge.swift \
     Sources/MenuRemote/RemoteModel.swift \
+    Sources/MenuRemote/ContentView.swift \
+    Sources/MenuRemote/PairingViews.swift \
     Sources/MenuRemote/DPadView.swift \
     Sources/MenuRemote/PlayerView.swift \
     tests/Swift/TextEntryViewTests.swift \

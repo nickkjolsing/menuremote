@@ -74,6 +74,10 @@ struct NowPlaying: Equatable {
 
 @MainActor
 final class RemoteModel: ObservableObject {
+    enum VolumeControlMode: Equatable {
+        case slider, buttons, unavailable
+    }
+
     enum Phase: Equatable {
         case settingUp(String)
         case setupFailed(String)
@@ -102,6 +106,8 @@ final class RemoteModel: ObservableObject {
     @Published var artwork: NSImage?
     @Published var volume: Double?
     @Published var volumeAvailable = false
+    @Published var volumeUpAvailable = false
+    @Published var volumeDownAvailable = false
     @Published var powerOn: Bool?
     @Published var lastError: String?
     @Published var keyboardAvailable = false
@@ -131,6 +137,10 @@ final class RemoteModel: ObservableObject {
     private var bridgeConnected = false
 
     var isConnected: Bool { phase == .connected }
+    var volumeControlMode: VolumeControlMode {
+        if volumeAvailable, let volume, volume.isFinite, (0...100).contains(volume) { return .slider }
+        return volumeUpAvailable || volumeDownAvailable ? .buttons : .unavailable
+    }
     var hasSavedDevice: Bool { savedDeviceID != nil }
     var needsTextEntry: Bool { isConnected && keyboardAvailable && keyboardFocused }
     var canSendText: Bool {
@@ -170,6 +180,7 @@ final class RemoteModel: ObservableObject {
 
     private func bridgeExited(_ status: Int32) {
         bridgeConnected = false
+        resetVolume()
         resetKeyboard()
         restartAttempts += 1
         guard restartAttempts <= 3 else {
@@ -210,6 +221,7 @@ final class RemoteModel: ObservableObject {
             restartAttempts = 0
             bridgeConnected = true
             guard !choosingDevice else { break }
+            resetVolume()
             if let device = (e["device"] as? [String: Any]).flatMap(AppleTVDevice.init) {
                 deviceName = device.name
                 savedDeviceID = device.id
@@ -225,6 +237,7 @@ final class RemoteModel: ObservableObject {
             }
         case "asleep":
             bridgeConnected = false
+            resetVolume()
             resetKeyboard()
             if !choosingDevice,
                let device = (e["device"] as? [String: Any]).flatMap(AppleTVDevice.init) {
@@ -235,11 +248,13 @@ final class RemoteModel: ObservableObject {
             powerOn = false
         case "disconnected":
             bridgeConnected = false
+            resetVolume()
             resetKeyboard()
             if !choosingDevice && (e["reason"] as? String) != "user" {
                 phase = .disconnected("Connection lost")
             }
         case "reconnecting":
+            resetVolume()
             guard !choosingDevice else { break }
             if case .asleep = phase { break }
             let seconds = e["seconds"] as? Int ?? 0
@@ -255,8 +270,13 @@ final class RemoteModel: ObservableObject {
                 artwork = nil
             }
         case "volume":
-            volumeAvailable = e["available"] as? Bool ?? false
-            volume = (e["level"] as? NSNumber)?.doubleValue
+            guard bridgeConnected && !choosingDevice,
+                  e["device_id"] as? String == savedDeviceID else { break }
+            let level = (e["level"] as? NSNumber)?.doubleValue
+            volume = level.flatMap { $0.isFinite && (0...100).contains($0) ? $0 : nil }
+            volumeAvailable = (e["available"] as? Bool ?? false) && volume != nil
+            volumeUpAvailable = e["up_available"] as? Bool ?? false
+            volumeDownAvailable = e["down_available"] as? Bool ?? false
         case "power":
             if e["known"] as? Bool ?? true { powerOn = e["on"] as? Bool }
         case "keyboard":
@@ -327,6 +347,7 @@ final class RemoteModel: ObservableObject {
     }
 
     func showDevicePicker() {
+        resetVolume()
         resetKeyboard(clearDraft: true)
         phase = .choosingDevice
         scan()
@@ -352,6 +373,7 @@ final class RemoteModel: ObservableObject {
     }
 
     func choose(_ device: AppleTVDevice) {
+        resetVolume()
         resetKeyboard(clearDraft: true)
         deviceName = device.name
         if device.paired {
@@ -364,6 +386,7 @@ final class RemoteModel: ObservableObject {
     }
 
     func pair(_ device: AppleTVDevice) {
+        resetVolume()
         pairing = Pairing(device: device)
         bridge.send(["cmd": "pair_begin", "id": device.id])
     }
@@ -386,6 +409,7 @@ final class RemoteModel: ObservableObject {
     }
 
     func reconnect() {
+        resetVolume()
         guard let id = savedDeviceID else { return showDevicePicker() }
         resetKeyboard()
         phase = .connecting(deviceName)
@@ -505,12 +529,28 @@ final class RemoteModel: ObservableObject {
         bridge.send(["cmd": "seek", "position": Int(position)])
     }
 
+    private func resetVolume() {
+        volume = nil
+        volumeAvailable = false
+        volumeUpAvailable = false
+        volumeDownAvailable = false
+        lastVolumeSend = .distantPast
+    }
+
     func setVolume(_ level: Double, final: Bool) {
+        guard isConnected, volumeControlMode == .slider, level.isFinite,
+              (0...100).contains(level), let id = savedDeviceID else { return }
         volume = level
         // Throttle while dragging; always send the final value.
         guard final || Date().timeIntervalSince(lastVolumeSend) > 0.15 else { return }
         lastVolumeSend = Date()
-        bridge.send(["cmd": "volume", "level": level])
+        bridge.send(["cmd": "volume", "level": level, "device_id": id])
+    }
+
+    func changeVolume(up: Bool) {
+        guard isConnected, let id = savedDeviceID,
+              up ? volumeUpAvailable : volumeDownAvailable else { return }
+        bridge.send(["cmd": "volume_step", "direction": up ? "up" : "down", "device_id": id])
     }
 
     func press(_ key: String, hold: Bool = false) {

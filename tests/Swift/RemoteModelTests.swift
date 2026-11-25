@@ -201,6 +201,50 @@ enum RemoteModelTests {
         }
     }
 
+    static func testVolumeControlsFollowCapabilitiesAndNeverInventALevel() {
+        withModel { model in
+            model.handle(["event": "connected", "device": oldDevice])
+            precondition(model.volumeControlMode == .unavailable)
+            model.handle(["event": "volume", "device_id": "old-tv", "available": true, "level": 42.0,
+                          "up_available": true, "down_available": true])
+            precondition(model.volumeControlMode == .slider && model.volume == 42)
+            model.handle(["event": "volume", "device_id": "old-tv", "available": false,
+                          "up_available": true, "down_available": true])
+            precondition(model.volumeControlMode == .buttons && model.volume == nil)
+            model.setVolume(50, final: true)
+            model.changeVolume(up: true)
+            precondition(model.volume == nil, "Step controls must not invent a volume percentage")
+            model.handle(["event": "volume", "device_id": "old-tv", "available": true,
+                          "level": Double.nan, "up_available": true])
+            precondition(model.volumeControlMode == .buttons && model.volume == nil)
+            model.handle(["event": "volume", "device_id": "old-tv", "available": true, "level": 0.0])
+            precondition(model.volumeControlMode == .slider && model.volume == 0)
+            model.handle(["event": "volume", "device_id": "old-tv", "available": false])
+            precondition(model.volumeControlMode == .unavailable)
+        }
+    }
+
+    static func testVolumeResetsOnDisconnectAndIgnoresOldDeviceUpdates() {
+        withModel { model in
+            model.handle(["event": "connected", "device": oldDevice])
+            let volume: [String: Any] = ["event": "volume", "device_id": "old-tv",
+                                        "available": true, "level": 42.0, "up_available": true]
+            model.handle(volume)
+            model.handle(["event": "disconnected"])
+            precondition(model.volumeControlMode == .unavailable && model.volume == nil)
+            model.handle(volume)
+            precondition(model.volumeControlMode == .unavailable)
+            model.handle(["event": "connected", "device": ["id": "new-tv", "name": "Other TV"]])
+            model.handle(volume)
+            precondition(model.volumeControlMode == .unavailable, "Old TV enabled the new TV's volume controls")
+            model.handle(["event": "volume", "device_id": "new-tv", "up_available": true])
+            precondition(model.volumeControlMode == .buttons && !model.volumeDownAvailable)
+            model.showDevicePicker()
+            model.handle(["event": "volume", "device_id": "new-tv", "available": true, "level": 50.0])
+            precondition(model.volumeControlMode == .unavailable)
+        }
+    }
+
     static func main() {
         testOldConnectionEventsDoNotDismissDevicePicker()
         testOldConnectionDoesNotCancelReplacementPairing()
@@ -212,6 +256,8 @@ enum RemoteModelTests {
         testTextFailureRetainsDraftAndDisconnectInvalidatesAcknowledgements()
         testSwitchingDevicesClearsDraftAndIgnoresOldKeyboardEvents()
         testTextEntryFollowsTVFocusAndStopsWhenConnectionIsLost()
-        print("All 10 remote model tests passed")
+        testVolumeControlsFollowCapabilitiesAndNeverInventALevel()
+        testVolumeResetsOnDisconnectAndIgnoresOldDeviceUpdates()
+        print("All 12 remote model tests passed")
     }
 }

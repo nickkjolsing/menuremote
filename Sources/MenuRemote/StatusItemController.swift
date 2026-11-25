@@ -72,9 +72,14 @@ final class StatusItemController: NSObject, NSApplicationDelegate {
         updater.willCheckForUpdates = { [weak self] in self?.closePanel() }
         updater.start()
 
-        if CommandLine.arguments.contains("--show-panel") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.showPanel() }
+        if !model.hasSavedDevice || CommandLine.arguments.contains("--show-panel") {
+            DispatchQueue.main.async { [weak self] in self?.showPanel() }
         }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showPanel()
+        return false
     }
 
     private func setIcon() {

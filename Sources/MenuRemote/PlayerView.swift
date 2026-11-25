@@ -160,20 +160,38 @@ struct PlayerView: View {
     }
 
     private var volume: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "speaker.fill")
-            ScrubBar(
-                value: (model.volume ?? 0) / 100,
-                enabled: connected && model.volumeAvailable,
-                onChanged: { model.setVolume($0 * 100, final: false) },
-                onCommit: { model.setVolume($0 * 100, final: true) }
-            )
-            Image(systemName: "speaker.wave.3.fill")
+        Group {
+            switch model.volumeControlMode {
+            case .slider:
+                HStack(spacing: 10) {
+                    Image(systemName: "speaker.fill")
+                    ScrubBar(
+                        value: (model.volume ?? 0) / 100,
+                        enabled: connected,
+                        onChanged: { model.setVolume($0 * 100, final: false) },
+                        onCommit: { model.setVolume($0 * 100, final: true) }
+                    )
+                    .accessibilityLabel("Volume")
+                    Image(systemName: "speaker.wave.3.fill")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            case .buttons:
+                VolumeStepButtons(
+                    canDecrease: connected && model.volumeDownAvailable,
+                    canIncrease: connected && model.volumeUpAvailable,
+                    decrease: { model.changeVolume(up: false) },
+                    increase: { model.changeVolume(up: true) }
+                )
+            case .unavailable:
+                Label("Volume unavailable", systemImage: "speaker.slash")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help("This Apple TV isn't reporting volume controls.")
+            }
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .opacity(model.volumeAvailable ? 1 : 0.5)
-        .help(model.volumeAvailable ? "" : "Volume isn't controllable for this Apple TV's audio output")
+        .frame(height: 32)
     }
 
     // MARK: - Keyboard
@@ -336,6 +354,28 @@ struct IconButton: View {
         .opacity(isEnabled ? 1 : 0.35)
         .onHover { hovering = $0 }
         .help(help)
+    }
+}
+
+struct VolumeStepButtons: View {
+    var canDecrease: Bool
+    var canIncrease: Bool
+    var decrease: () -> Void
+    var increase: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            IconButton(systemName: "minus", size: 14, help: "Volume Down", action: decrease)
+                .disabled(!canDecrease)
+                .accessibilityLabel("Volume Down")
+            Label("Volume", systemImage: "speaker.wave.2")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+            IconButton(systemName: "plus", size: 14, help: "Volume Up", action: increase)
+                .disabled(!canIncrease)
+                .accessibilityLabel("Volume Up")
+        }
     }
 }
 
